@@ -116,7 +116,7 @@ final class AppState {
             overlayController.dismiss()
             return
         }
-        guard !isTimerActive else { return }
+        guard !overlayController.isDismissing, !isTimerActive else { return }
         guard let result = await screenCaptureManager.captureScreen() else {
             hasScreenRecordingPermission = false
             return

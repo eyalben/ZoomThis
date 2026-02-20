@@ -29,6 +29,12 @@ final class ZoomOverlayView: NSView {
         fatalError()
     }
 
+    override var acceptsFirstResponder: Bool { true }
+
+    override func keyDown(with event: NSEvent) {
+        // Suppress default NSBeep — key events are handled by the event monitor
+    }
+
     func updateMousePosition(_ screenPoint: NSPoint) {
         mousePosition = screenPoint
         needsDisplay = true

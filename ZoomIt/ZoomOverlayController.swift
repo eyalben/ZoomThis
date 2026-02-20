@@ -39,7 +39,8 @@ final class ZoomOverlayController {
     private var localEventMonitor: Any?
     private var globalEventMonitor: Any?
     private var onDismiss: (() -> Void)?
-    private var isDismissing = false
+    private(set) var isDismissing = false
+    private var animationTimer: Timer?
     private var targetZoom: CGFloat = 2.0
     private let animationDuration = 0.2
     private var animateIn = true
@@ -74,17 +75,15 @@ final class ZoomOverlayController {
     }
 
     func show(image: CGImage, screen: NSScreen, initialZoom: CGFloat = 2.0, animateIn: Bool = true, defaultColor: NSColor = .red, defaultLineWidth: CGFloat = 3.0, defaultTextFontSize: CGFloat = 24.0, onDismiss: @escaping () -> Void) {
+        // Safety net: tear down any prior session that wasn't fully cleaned up
+        cleanup()
+
         self.onDismiss = onDismiss
         self.targetZoom = initialZoom
         self.animateIn = animateIn
         self.textFontSize = defaultTextFontSize
-        isDismissing = false
-        mode = .panning
         drawingState.reset(color: defaultColor, lineWidth: defaultLineWidth)
-        isDragging = false
-        isCursorHidden = false
         panningMousePosition = .zero
-        isCropMode = false
         isCropDragging = false
         textBuffer = ""
         let screenFrame = screen.frame
@@ -110,7 +109,8 @@ final class ZoomOverlayController {
 
         zoomView.updateMousePosition(NSEvent.mouseLocation)
         window.makeKeyAndOrderFront(nil)
-        NSApp.activate()
+        window.makeFirstResponder(zoomView)
+        NSApp.activate(ignoringOtherApps: true)
 
         if animateIn {
             animateZoom(from: 1.0, to: targetZoom) { [weak self] in
@@ -800,8 +800,6 @@ final class ZoomOverlayController {
     func dismiss() {
         guard !isDismissing else { return }
         isDismissing = true
-        stopCursorBlink()
-        unhideCursor()
 
         if let monitor = localEventMonitor {
             NSEvent.removeMonitor(monitor)
@@ -815,17 +813,18 @@ final class ZoomOverlayController {
         let currentZoom = zoomView?.zoomFactor ?? targetZoom
         if animateIn {
             animateZoom(from: currentZoom, to: 1.0) { [weak self] in
-                self?.tearDown()
+                self?.cleanup()
             }
         } else {
-            tearDown()
+            cleanup()
         }
     }
 
     private func animateZoom(from startZoom: CGFloat, to endZoom: CGFloat, completion: @escaping () -> Void) {
+        animationTimer?.invalidate()
         let startTime = CACurrentMediaTime()
 
-        Timer.scheduledTimer(withTimeInterval: 1.0 / 60.0, repeats: true) { [weak self] timer in
+        animationTimer = Timer.scheduledTimer(withTimeInterval: 1.0 / 60.0, repeats: true) { [weak self] timer in
             guard let self else { timer.invalidate(); return }
 
             let progress = min((CACurrentMediaTime() - startTime) / self.animationDuration, 1.0)
@@ -834,16 +833,37 @@ final class ZoomOverlayController {
 
             if progress >= 1.0 {
                 timer.invalidate()
+                self.animationTimer = nil
                 completion()
             }
         }
     }
 
-    private func tearDown() {
+    private func cleanup() {
+        animationTimer?.invalidate()
+        animationTimer = nil
+
+        if let monitor = localEventMonitor {
+            NSEvent.removeMonitor(monitor)
+            localEventMonitor = nil
+        }
+        if let monitor = globalEventMonitor {
+            NSEvent.removeMonitor(monitor)
+            globalEventMonitor = nil
+        }
+
+        stopCursorBlink()
+        unhideCursor()
+
         window?.orderOut(nil)
         window = nil
         zoomView = nil
+
         mode = .panning
+        isDismissing = false
+        isDragging = false
+        isCropMode = false
+
         let callback = onDismiss
         onDismiss = nil
         callback?()
