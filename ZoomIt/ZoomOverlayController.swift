@@ -47,12 +47,14 @@ final class ZoomOverlayController {
     private(set) var mode: OverlayMode = .panning
 
     private var drawingState = DrawingState()
+    private let toolTipHUD = ToolTipHUD()
     private var isDragging = false
     private var dragStart: CGPoint = .zero // image coords
     private var dragCurrent: CGPoint = .zero // image coords
     private var panningMousePosition: NSPoint = .zero
     private var isCursorHidden = false
     private var activeTool: DrawingTool = .freehand
+    private var lastDrawingModifiers: NSEvent.ModifierFlags = []
 
     // Text input state
     private var textBuffer: String = ""
@@ -138,7 +140,7 @@ final class ZoomOverlayController {
     private func startEventMonitor() {
         hideCursor()
         localEventMonitor = NSEvent.addLocalMonitorForEvents(
-            matching: [.keyDown, .mouseMoved, .leftMouseDragged, .rightMouseDragged,
+            matching: [.keyDown, .flagsChanged, .mouseMoved, .leftMouseDragged, .rightMouseDragged,
                        .leftMouseDown, .leftMouseUp, .rightMouseDown, .scrollWheel]
         ) { [weak self] event in
             self?.handleEvent(event) ?? event
@@ -233,6 +235,9 @@ final class ZoomOverlayController {
             return handleDrawingMouseDrag(event)
         case .leftMouseUp:
             return handleDrawingMouseUp(event)
+        case .flagsChanged:
+            handleDrawingFlagsChanged(event)
+            return event
         case .mouseMoved:
             zoomView?.updateCursorDotPosition(NSEvent.mouseLocation)
             return event
@@ -296,35 +301,42 @@ final class ZoomOverlayController {
             drawingState.currentColor = isShift ? NSColor.red.withAlphaComponent(0.3) : .red
             drawingState.isBlurMode = false
             updateCursorDot()
+            showColorHUD(name: "Red", isHighlight: isShift)
             return nil
         case 5: // G
             drawingState.currentColor = isShift ? NSColor.green.withAlphaComponent(0.3) : .green
             drawingState.isBlurMode = false
             updateCursorDot()
+            showColorHUD(name: "Green", isHighlight: isShift)
             return nil
         case 11: // B
             drawingState.currentColor = isShift ? NSColor.blue.withAlphaComponent(0.3) : .blue
             drawingState.isBlurMode = false
             updateCursorDot()
+            showColorHUD(name: "Blue", isHighlight: isShift)
             return nil
         case 16: // Y
             drawingState.currentColor = isShift ? NSColor.yellow.withAlphaComponent(0.3) : .yellow
             drawingState.isBlurMode = false
             updateCursorDot()
+            showColorHUD(name: "Yellow", isHighlight: isShift)
             return nil
         case 31: // O
             drawingState.currentColor = isShift ? NSColor.orange.withAlphaComponent(0.3) : .orange
             drawingState.isBlurMode = false
             updateCursorDot()
+            showColorHUD(name: "Orange", isHighlight: isShift)
             return nil
         case 35: // P
             drawingState.currentColor = isShift ? NSColor.systemPink.withAlphaComponent(0.3) : .systemPink
             drawingState.isBlurMode = false
             updateCursorDot()
+            showColorHUD(name: "Pink", isHighlight: isShift)
             return nil
         case 7: // X → blur mode
             drawingState.isBlurMode = true
             updateCursorDot()
+            showBlurHUD()
             return nil
         case 14: // E → erase all
             drawingState.actions.append(.eraseAll)
@@ -382,6 +394,41 @@ final class ZoomOverlayController {
             return .ellipse
         }
         return .freehand
+    }
+
+    private func handleDrawingFlagsChanged(_ event: NSEvent) {
+        guard !isDragging else { return }
+        let relevant: NSEvent.ModifierFlags = [.shift, .control, .option]
+        let current = event.modifierFlags.intersection(relevant)
+        let previous = lastDrawingModifiers
+        lastDrawingModifiers = current
+
+        // Only show HUD when modifiers are being pressed, not released
+        guard !current.isEmpty, current.rawValue > previous.rawValue else { return }
+
+        let tool = toolFromModifiers(event.modifierFlags)
+        switch tool {
+        case .line:
+            toolTipHUD.show(content: .tool(name: "Line", sfSymbol: "line.diagonal"))
+        case .rect:
+            toolTipHUD.show(content: .tool(name: "Rectangle", sfSymbol: "rectangle"))
+        case .ellipse:
+            toolTipHUD.show(content: .tool(name: "Ellipse", sfSymbol: "circle"))
+        case .arrow:
+            toolTipHUD.show(content: .tool(name: "Arrow", sfSymbol: "arrow.up.left"))
+        case .freehand:
+            break
+        }
+    }
+
+    private func showColorHUD(name: String, isHighlight: Bool) {
+        let displayName = isHighlight ? "\(name) Highlight" : name
+        let color = drawingState.currentColor
+        toolTipHUD.show(content: .color(name: displayName, color: color))
+    }
+
+    private func showBlurHUD() {
+        toolTipHUD.show(content: .color(name: "Blur", color: .gray))
     }
 
     private func handleDrawingMouseDown(_ event: NSEvent) -> NSEvent? {
@@ -649,6 +696,7 @@ final class ZoomOverlayController {
         isCropMode = true
         cropExportAction = action
         isCropDragging = false
+        toolTipHUD.hide()
         hideCursorDot()
         unhideCursor()
         NSCursor.crosshair.set()
@@ -772,6 +820,7 @@ final class ZoomOverlayController {
 
     private func returnToPanningMode() {
         mode = .panning
+        toolTipHUD.hide()
         hideCursorDot()
         hideCursor()
         // Warp cursor back to where it was when drawing mode was entered.
@@ -898,6 +947,7 @@ final class ZoomOverlayController {
         }
 
         stopCursorBlink()
+        toolTipHUD.teardown()
         unhideCursor()
 
         window?.orderOut(nil)
@@ -908,6 +958,7 @@ final class ZoomOverlayController {
         isDismissing = false
         isDragging = false
         isCropMode = false
+        lastDrawingModifiers = []
 
         let callback = onDismiss
         onDismiss = nil
