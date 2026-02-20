@@ -37,6 +37,7 @@ final class ZoomOverlayController {
     private var window: NSWindow?
     private var zoomView: ZoomOverlayView?
     private var localEventMonitor: Any?
+    private var globalEventMonitor: Any?
     private var onDismiss: (() -> Void)?
     private var isDismissing = false
     private var targetZoom: CGFloat = 2.0
@@ -139,6 +140,12 @@ final class ZoomOverlayController {
                        .leftMouseDown, .leftMouseUp, .rightMouseDown, .scrollWheel]
         ) { [weak self] event in
             self?.handleEvent(event) ?? event
+        }
+        // Global monitor catches Escape even when the app loses focus
+        globalEventMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            if event.keyCode == 53 { // Escape
+                self?.dismiss()
+            }
         }
     }
 
@@ -799,6 +806,10 @@ final class ZoomOverlayController {
         if let monitor = localEventMonitor {
             NSEvent.removeMonitor(monitor)
             localEventMonitor = nil
+        }
+        if let monitor = globalEventMonitor {
+            NSEvent.removeMonitor(monitor)
+            globalEventMonitor = nil
         }
 
         let currentZoom = zoomView?.zoomFactor ?? targetZoom
