@@ -3,7 +3,7 @@ import ServiceManagement
 import os.log
 
 private extension Logger {
-    static let general = Logger(subsystem: Bundle.main.bundleIdentifier ?? "ZoomIt", category: "general")
+    static let general = Logger(subsystem: Bundle.main.bundleIdentifier ?? "ZoomThis", category: "general")
 }
 
 @Observable
@@ -53,7 +53,7 @@ final class AppState {
 
     // MARK: - Permission Polling
 
-    func startPermissionPolling() {
+    func startPermissionPolling() { 
         stopPermissionPolling()
         permissionPollTimer = Timer.scheduledTimer(withTimeInterval: 1.5, repeats: true) { [weak self] _ in
             Task { @MainActor in

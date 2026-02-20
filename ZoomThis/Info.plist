@@ -3,6 +3,6 @@
 <plist version="1.0">
 <dict>
 	<key>NSScreenCaptureUsageDescription</key>
-	<string>ZoomIt needs screen recording permission to capture and zoom the screen.</string>
+	<string>ZoomThis needs screen recording permission to capture and zoom the screen.</string>
 </dict>
 </plist>

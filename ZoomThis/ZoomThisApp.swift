@@ -1,7 +1,7 @@
 import SwiftUI
 
 @main
-struct ZoomItApp: App {
+struct ZoomThisApp: App {
     @State private var appState = AppState()
     @Environment(\.openWindow) private var openWindow
 
@@ -14,7 +14,7 @@ struct ZoomItApp: App {
     }
 
     var body: some Scene {
-        MenuBarExtra("ZoomIt", systemImage: "plus.magnifyingglass") {
+        MenuBarExtra("ZoomThis", systemImage: "plus.magnifyingglass") {
             Button("Zoom \(zoomShortcut)") {
                 Task { await appState.activateZoom() }
             }
@@ -41,13 +41,13 @@ struct ZoomItApp: App {
 
             Divider()
 
-            Button("Quit ZoomIt") {
+            Button("Quit ZoomThis") {
                 NSApplication.shared.terminate(nil)
             }
             .keyboardShortcut("q", modifiers: .command)
         }
 
-        Window("ZoomIt Settings", id: "settings") {
+        Window("ZoomThis Settings", id: "settings") {
             SettingsView()
                 .environment(appState)
         }

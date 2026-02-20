@@ -150,7 +150,7 @@ struct SettingsView: View {
                     .resizable()
                     .frame(width: 64, height: 64)
 
-                Text("ZoomIt needs Screen Recording")
+                Text("ZoomThis needs Screen Recording")
                     .font(.title2.bold())
 
                 Text("This permission is required to capture and zoom the screen.")
@@ -335,7 +335,7 @@ struct SettingsView: View {
                 .resizable()
                 .frame(width: 80, height: 80)
 
-            Text("ZoomIt")
+            Text("ZoomThis")
                 .font(.title.bold())
 
             Text("Version \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.0")")

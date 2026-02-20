@@ -791,7 +791,7 @@ final class ZoomOverlayController {
     private func savePNG(image: NSImage) {
         let panel = NSSavePanel()
         panel.allowedContentTypes = [.png]
-        panel.nameFieldStringValue = "ZoomIt Screenshot.png"
+        panel.nameFieldStringValue = "ZoomThis Screenshot.png"
         panel.level = .screenSaver + 1
         panel.begin { response in
             guard response == .OK, let url = panel.url else { return }
