@@ -83,6 +83,12 @@ enum DrawingAction {
             context.fillPath()
 
         case .text(let string, let position, let font, let color, let alignment):
+            // Push this CGContext as NSGraphicsContext so NSString.draw targets it
+            let nsContext = NSGraphicsContext(cgContext: context, flipped: true)
+            NSGraphicsContext.saveGraphicsState()
+            NSGraphicsContext.current = nsContext
+            defer { NSGraphicsContext.restoreGraphicsState() }
+
             let paragraphStyle = NSMutableParagraphStyle()
             paragraphStyle.alignment = alignment
             let attributes: [NSAttributedString.Key: Any] = [
@@ -92,14 +98,13 @@ enum DrawingAction {
             ]
             let nsString = string as NSString
             let size = nsString.size(withAttributes: attributes)
-            // Context is already Y-down (flipped by caller), so draw at position directly.
-            // NSString.draw works correctly in a Y-down context.
+            let verticalOffset = size.height / 2
             let drawRect: CGRect
             switch alignment {
             case .right:
-                drawRect = CGRect(x: position.x - size.width, y: position.y, width: size.width + 100, height: size.height * 10)
+                drawRect = CGRect(x: position.x - size.width, y: position.y - verticalOffset, width: size.width + 100, height: size.height * 10)
             default:
-                drawRect = CGRect(x: position.x, y: position.y, width: size.width + 100, height: size.height * 10)
+                drawRect = CGRect(x: position.x, y: position.y - verticalOffset, width: size.width + 100, height: size.height * 10)
             }
             nsString.draw(in: drawRect, withAttributes: attributes)
 

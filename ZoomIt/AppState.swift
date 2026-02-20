@@ -56,7 +56,7 @@ final class AppState {
     func startPermissionPolling() {
         stopPermissionPolling()
         permissionPollTimer = Timer.scheduledTimer(withTimeInterval: 1.5, repeats: true) { [weak self] _ in
-            MainActor.assumeIsolated {
+            Task { @MainActor in
                 self?.checkPermissions()
             }
         }
@@ -112,7 +112,11 @@ final class AppState {
     // MARK: - Zoom
 
     func activateZoom() async {
-        guard !isZoomActive, !isTimerActive else { return }
+        if isZoomActive {
+            overlayController.dismiss()
+            return
+        }
+        guard !isTimerActive else { return }
         guard let result = await screenCaptureManager.captureScreen() else {
             hasScreenRecordingPermission = false
             return

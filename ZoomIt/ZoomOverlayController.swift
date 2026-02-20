@@ -138,7 +138,7 @@ final class ZoomOverlayController {
             matching: [.keyDown, .mouseMoved, .leftMouseDragged, .rightMouseDragged,
                        .leftMouseDown, .leftMouseUp, .rightMouseDown, .scrollWheel]
         ) { [weak self] event in
-            self?.handleEvent(event)
+            self?.handleEvent(event) ?? event
         }
     }
 
@@ -471,13 +471,11 @@ final class ZoomOverlayController {
         case .keyDown:
             return handleTextKeyDown(event)
         case .leftMouseDown:
-            // Commit current text and start new
+            // Commit current text and return to drawing
             commitText()
-            if let imgPt = imagePoint(from: NSEvent.mouseLocation) {
-                textInsertionPoint = imgPt
-                textBuffer = ""
-                updateTextPreview()
-            }
+            mode = .drawing
+            stopCursorBlink()
+            NSCursor.crosshair.set()
             return nil
         case .mouseMoved:
             return event
@@ -543,9 +541,11 @@ final class ZoomOverlayController {
                 updateTextPreview()
             }
             return nil
-        case 36: // Return
-            textBuffer.append("\n")
-            updateTextPreview()
+        case 36: // Return → commit text and return to drawing
+            commitText()
+            mode = .drawing
+            stopCursorBlink()
+            NSCursor.crosshair.set()
             return nil
         case 126: // Up arrow
             if mods.contains(.control) {
