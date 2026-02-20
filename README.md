@@ -83,38 +83,10 @@ Full-screen countdown timer for structured breaks. Minimizes to the menu bar whe
 - **Zoom:** `Ctrl+1`
 - **Break Timer:** `Ctrl+3`
 
-Both hotkeys are fully customizable in Settings (`⌘,`).
-
-## Settings
-
-Open Settings from the menu bar icon or press `⌘,`:
-
-- **Zoom tab** — hotkey, initial magnification, animation toggle, default pen color/thickness/font size, quick reference card
-- **Timer tab** — hotkey, default duration (1–120 minutes), quick reference card
-- **About tab** — version info
+Both hotkeys are fully customizable in Settings.
 
 **Launch at Login** can be toggled from the status bar at the bottom of the Settings window.
 
-## Architecture
-
-The app is a pure SwiftUI/AppKit hybrid macOS app with no external dependencies.
-
-| File | Responsibility |
-|------|---------------|
-| `ZoomThisApp.swift` | App entry point, menu bar extra, window scene |
-| `AppState.swift` | Observable app state, settings persistence, hotkey registration |
-| `ZoomOverlayController.swift` | Zoom overlay lifecycle; panning/drawing/text-input state machine |
-| `ZoomOverlayView.swift` | NSView that renders the zoomed screenshot and all annotations |
-| `DrawingAction.swift` | Value-type enum of renderable drawing actions (CoreGraphics) |
-| `DrawingState.swift` | Mutable drawing session state (actions, current tool, color, width) |
-| `BreakTimerController.swift` | Break timer window lifecycle and countdown logic |
-| `BreakTimerView.swift` | Full-screen timer NSView |
-| `HotkeyManager.swift` | Carbon `RegisterEventHotKey` wrapper |
-| `ScreenCaptureManager.swift` | ScreenCaptureKit screenshot capture |
-| `PermissionManager.swift` | Screen recording permission check and settings deep-link |
-| `OverlayPanel.swift` | NSPanel subclass that stays above full-screen content |
-| `ToolTipHUD.swift` | Floating HUD for tool/color feedback |
-| `SettingsView.swift` | SwiftUI settings UI with hotkey recorder |
 
 ## License
 
