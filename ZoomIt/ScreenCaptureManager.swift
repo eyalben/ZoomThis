@@ -1,0 +1,60 @@
+import AppKit
+import ScreenCaptureKit
+
+final class ScreenCaptureManager {
+
+    struct CaptureResult {
+        let image: CGImage
+        let screen: NSScreen
+    }
+
+    func captureScreen() async -> CaptureResult? {
+        let mouseLocation = NSEvent.mouseLocation
+        guard let screen = NSScreen.screens.first(where: {
+            NSMouseInRect(mouseLocation, $0.frame, false)
+        }) ?? NSScreen.main else {
+            return nil
+        }
+
+        guard let displayID = screen.displayID else { return nil }
+
+        do {
+            let content = try await SCShareableContent.excludingDesktopWindows(
+                false, onScreenWindowsOnly: true
+            )
+            guard let display = content.displays.first(where: {
+                $0.displayID == displayID
+            }) else {
+                return nil
+            }
+
+            let filter = SCContentFilter(display: display, excludingWindows: [])
+            let config = SCStreamConfiguration()
+            let scale = Int(screen.backingScaleFactor)
+            config.width = display.width * scale
+            config.height = display.height * scale
+            config.showsCursor = false
+
+            let image = try await SCScreenshotManager.captureImage(
+                contentFilter: filter, configuration: config
+            )
+            return CaptureResult(image: image, screen: screen)
+        } catch {
+            return nil
+        }
+    }
+
+    func hasScreenRecordingPermission() -> Bool {
+        CGPreflightScreenCaptureAccess()
+    }
+
+    func requestScreenRecordingPermission() {
+        CGRequestScreenCaptureAccess()
+    }
+}
+
+private extension NSScreen {
+    var displayID: CGDirectDisplayID? {
+        deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? CGDirectDisplayID
+    }
+}
