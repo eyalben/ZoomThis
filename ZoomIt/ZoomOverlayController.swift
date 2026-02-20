@@ -97,6 +97,7 @@ final class ZoomOverlayController {
         window.level = .screenSaver
         window.isOpaque = true
         window.hasShadow = false
+        window.hidesOnDeactivate = false
         window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         window.backgroundColor = .black
 
@@ -108,9 +109,10 @@ final class ZoomOverlayController {
         self.window = window
 
         zoomView.updateMousePosition(NSEvent.mouseLocation)
-        window.makeKeyAndOrderFront(nil)
-        window.makeFirstResponder(zoomView)
         NSApp.activate(ignoringOtherApps: true)
+        window.makeKeyAndOrderFront(nil)
+        window.orderFrontRegardless()
+        window.makeFirstResponder(zoomView)
 
         if animateIn {
             animateZoom(from: 1.0, to: targetZoom) { [weak self] in
@@ -232,6 +234,7 @@ final class ZoomOverlayController {
         case .leftMouseUp:
             return handleDrawingMouseUp(event)
         case .mouseMoved:
+            zoomView?.updateCursorDotPosition(NSEvent.mouseLocation)
             return event
         case .rightMouseDown:
             returnToPanningMode()
@@ -242,6 +245,7 @@ final class ZoomOverlayController {
             } else {
                 adjustZoom(event)
             }
+            updateCursorDot()
             return nil
         default:
             return event
@@ -291,29 +295,36 @@ final class ZoomOverlayController {
         case 15: // R
             drawingState.currentColor = isShift ? NSColor.red.withAlphaComponent(0.3) : .red
             drawingState.isBlurMode = false
+            updateCursorDot()
             return nil
         case 5: // G
             drawingState.currentColor = isShift ? NSColor.green.withAlphaComponent(0.3) : .green
             drawingState.isBlurMode = false
+            updateCursorDot()
             return nil
         case 11: // B
             drawingState.currentColor = isShift ? NSColor.blue.withAlphaComponent(0.3) : .blue
             drawingState.isBlurMode = false
+            updateCursorDot()
             return nil
         case 16: // Y
             drawingState.currentColor = isShift ? NSColor.yellow.withAlphaComponent(0.3) : .yellow
             drawingState.isBlurMode = false
+            updateCursorDot()
             return nil
         case 31: // O
             drawingState.currentColor = isShift ? NSColor.orange.withAlphaComponent(0.3) : .orange
             drawingState.isBlurMode = false
+            updateCursorDot()
             return nil
         case 35: // P
             drawingState.currentColor = isShift ? NSColor.systemPink.withAlphaComponent(0.3) : .systemPink
             drawingState.isBlurMode = false
+            updateCursorDot()
             return nil
         case 7: // X → blur mode
             drawingState.isBlurMode = true
+            updateCursorDot()
             return nil
         case 14: // E → erase all
             drawingState.actions.append(.eraseAll)
@@ -340,15 +351,19 @@ final class ZoomOverlayController {
         case 126: // Up arrow
             if mods.contains(.control) {
                 drawingState.currentLineWidth = min(drawingState.currentLineWidth + 1, 30)
+                updateCursorDot()
             } else {
                 adjustZoomByStep(0.5)
+                updateCursorDot()
             }
             return nil
         case 125: // Down arrow
             if mods.contains(.control) {
                 drawingState.currentLineWidth = max(drawingState.currentLineWidth - 1, 1)
+                updateCursorDot()
             } else {
                 adjustZoomByStep(-0.5)
+                updateCursorDot()
             }
             return nil
         default:
@@ -380,6 +395,7 @@ final class ZoomOverlayController {
 
     private func handleDrawingMouseDrag(_ event: NSEvent) -> NSEvent? {
         guard isDragging, let imgPt = imagePoint(from: NSEvent.mouseLocation) else { return nil }
+        zoomView?.updateCursorDotPosition(NSEvent.mouseLocation)
         dragCurrent = imgPt
         drawingState.inProgressPoints.append(imgPt)
 
@@ -462,6 +478,8 @@ final class ZoomOverlayController {
         textBuffer = ""
         textFontSize = 24.0
         cursorVisible = true
+        hideCursorDot()
+        hideCursor()
 
         // Use current mouse position as insertion point
         if let imgPt = imagePoint(from: NSEvent.mouseLocation) {
@@ -482,9 +500,10 @@ final class ZoomOverlayController {
             commitText()
             mode = .drawing
             stopCursorBlink()
-            NSCursor.crosshair.set()
+            updateCursorDot()
             return nil
         case .mouseMoved:
+            zoomView?.updateCursorDotPosition(NSEvent.mouseLocation)
             return event
         case .scrollWheel:
             if event.modifierFlags.contains(.control) {
@@ -540,7 +559,7 @@ final class ZoomOverlayController {
             commitText()
             mode = .drawing
             stopCursorBlink()
-            NSCursor.crosshair.set()
+            updateCursorDot()
             return nil
         case 51: // Backspace
             if !textBuffer.isEmpty {
@@ -552,7 +571,7 @@ final class ZoomOverlayController {
             commitText()
             mode = .drawing
             stopCursorBlink()
-            NSCursor.crosshair.set()
+            updateCursorDot()
             return nil
         case 126: // Up arrow
             if mods.contains(.control) {
@@ -630,6 +649,8 @@ final class ZoomOverlayController {
         isCropMode = true
         cropExportAction = action
         isCropDragging = false
+        hideCursorDot()
+        unhideCursor()
         NSCursor.crosshair.set()
     }
 
@@ -640,6 +661,8 @@ final class ZoomOverlayController {
                 isCropMode = false
                 zoomView?.cropSelection = nil
                 zoomView?.needsDisplay = true
+                hideCursor()
+                updateCursorDot()
                 return nil
             }
             return event
@@ -675,6 +698,9 @@ final class ZoomOverlayController {
                 case .save:
                     exportRegionSave(cropRect)
                 }
+
+                hideCursor()
+                updateCursorDot()
             }
             return nil
         case .mouseMoved:
@@ -740,18 +766,37 @@ final class ZoomOverlayController {
     private func enterDrawingMode() {
         panningMousePosition = NSEvent.mouseLocation
         mode = .drawing
-        unhideCursor()
-        NSCursor.crosshair.set()
+        hideCursor()
+        updateCursorDot()
     }
 
     private func returnToPanningMode() {
         mode = .panning
+        hideCursorDot()
         hideCursor()
         // Warp cursor back to where it was when drawing mode was entered.
         // The cursor is hidden so the warp is invisible to the user.
         let flippedY = NSScreen.main.map { $0.frame.height - panningMousePosition.y } ?? panningMousePosition.y
         CGWarpMouseCursorPosition(CGPoint(x: panningMousePosition.x, y: flippedY))
         zoomView?.updateMousePosition(panningMousePosition)
+    }
+
+    // MARK: - Cursor Dot
+
+    private func updateCursorDot() {
+        guard let zoomView else { return }
+        let screenDiameter = drawingState.currentLineWidth * zoomView.zoomFactor
+        zoomView.cursorDotDiameter = max(screenDiameter, 6)
+        if drawingState.isBlurMode {
+            zoomView.cursorDotColor = NSColor.gray.withAlphaComponent(0.5)
+        } else {
+            zoomView.cursorDotColor = drawingState.currentColor
+        }
+        zoomView.showCursorDot = true
+    }
+
+    private func hideCursorDot() {
+        zoomView?.showCursorDot = false
     }
 
     // MARK: - Zoom

@@ -15,6 +15,18 @@ final class ZoomOverlayView: NSView {
         didSet { needsDisplay = true }
     }
 
+    // Cursor dot preview for drawing mode
+    private var cursorDotPosition: NSPoint = .zero
+    var showCursorDot: Bool = false {
+        didSet { needsDisplay = true }
+    }
+    var cursorDotDiameter: CGFloat = 6 {
+        didSet { needsDisplay = true }
+    }
+    var cursorDotColor: NSColor = .red {
+        didSet { needsDisplay = true }
+    }
+
     // Cached committed drawing layer — invalidated on commit/undo
     private var committedLayer: CGImage?
     private var committedActionCount = 0
@@ -37,6 +49,11 @@ final class ZoomOverlayView: NSView {
 
     func updateMousePosition(_ screenPoint: NSPoint) {
         mousePosition = screenPoint
+        needsDisplay = true
+    }
+
+    func updateCursorDotPosition(_ screenPoint: NSPoint) {
+        cursorDotPosition = screenPoint
         needsDisplay = true
     }
 
@@ -157,6 +174,11 @@ final class ZoomOverlayView: NSView {
         if let cropSelection {
             drawCropSelection(context: context, selection: cropSelection)
         }
+
+        // Draw cursor dot preview (drawing mode only, not exported)
+        if showCursorDot {
+            drawCursorDot(context: context)
+        }
     }
 
     private func drawAnnotations(context: CGContext, cropRect: CGRect) {
@@ -241,6 +263,34 @@ final class ZoomOverlayView: NSView {
         context.setLineWidth(1.5)
         context.setLineDash(phase: 0, lengths: [6, 4])
         context.stroke(viewRect)
+        context.restoreGState()
+    }
+
+    // MARK: - Cursor Dot
+
+    private func drawCursorDot(context: CGContext) {
+        // Convert screen-space cursor dot position to view-local coords
+        let viewX = cursorDotPosition.x - frame.origin.x
+        let viewY = cursorDotPosition.y - frame.origin.y
+        let diameter = max(cursorDotDiameter, 6)
+        let radius = diameter / 2
+
+        let dotRect = CGRect(
+            x: viewX - radius,
+            y: viewY - radius,
+            width: diameter,
+            height: diameter
+        )
+
+        // Filled dot
+        context.saveGState()
+        context.setFillColor(cursorDotColor.cgColor)
+        context.fillEllipse(in: dotRect)
+
+        // White stroke outline for visibility
+        context.setStrokeColor(NSColor.white.cgColor)
+        context.setLineWidth(1.5)
+        context.strokeEllipse(in: dotRect)
         context.restoreGState()
     }
 
