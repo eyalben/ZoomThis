@@ -37,14 +37,12 @@ struct ZoomThisApp: App {
                 openWindow(id: "settings")
                 NSApplication.shared.activate()
             }
-            .keyboardShortcut(",", modifiers: .command)
 
             Divider()
 
             Button("Quit ZoomThis") {
                 NSApplication.shared.terminate(nil)
             }
-            .keyboardShortcut("q", modifiers: .command)
         }
 
         Window("ZoomThis Settings", id: "settings") {
