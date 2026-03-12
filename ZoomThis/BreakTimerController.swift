@@ -63,9 +63,10 @@ final class BreakTimerController {
         countdownTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
             guard let self else { return }
             self.remainingSeconds -= 1
-            self.timerView?.remainingSeconds = self.remainingSeconds
             if self.remainingSeconds <= 0 {
                 self.dismiss()
+            } else {
+                self.timerView?.remainingSeconds = self.remainingSeconds
             }
         }
     }
