@@ -6,7 +6,7 @@ private extension Logger {
     static let general = Logger(subsystem: Bundle.main.bundleIdentifier ?? "ZoomThis", category: "general")
 }
 
-@Observable
+@MainActor @Observable
 final class AppState {
     static let zoomHotkeyID: UInt32 = 1  // Ctrl+1
     // ID 2 reserved for future Ctrl+2 (e.g. drawing-only mode)
@@ -57,10 +57,11 @@ final class AppState {
 
     // MARK: - Permission Polling
 
-    func startPermissionPolling() { 
+    func startPermissionPolling() {
         stopPermissionPolling()
         permissionPollTimer = Timer.scheduledTimer(withTimeInterval: 1.5, repeats: true) { [weak self] _ in
-            Task { @MainActor in
+            guard let self else { return }
+            Task { @MainActor [weak self] in
                 self?.checkPermissions()
             }
         }
@@ -96,7 +97,7 @@ final class AppState {
     func registerHotkey() {
         hotkeyManager.unregister(id: AppState.zoomHotkeyID)
         hotkeyManager.register(id: AppState.zoomHotkeyID, keyCode: hotkeyKeyCode, modifiers: hotkeyModifiers) { [weak self] in
-            Task { @MainActor in
+            Task { @MainActor [weak self] in
                 await self?.activateZoom()
             }
         }
@@ -107,7 +108,7 @@ final class AppState {
     func registerTimerHotkey() {
         hotkeyManager.unregister(id: AppState.timerHotkeyID)
         hotkeyManager.register(id: AppState.timerHotkeyID, keyCode: timerHotkeyKeyCode, modifiers: timerHotkeyModifiers) { [weak self] in
-            Task { @MainActor in
+            Task { @MainActor [weak self] in
                 self?.activateTimer()
             }
         }
