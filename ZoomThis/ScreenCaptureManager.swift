@@ -44,13 +44,6 @@ final class ScreenCaptureManager {
         }
     }
 
-    func hasScreenRecordingPermission() -> Bool {
-        CGPreflightScreenCaptureAccess()
-    }
-
-    func requestScreenRecordingPermission() {
-        CGRequestScreenCaptureAccess()
-    }
 }
 
 private extension NSScreen {
