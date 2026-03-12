@@ -4,5 +4,7 @@
 <dict>
 	<key>NSScreenCaptureUsageDescription</key>
 	<string>ZoomThis needs screen recording permission to capture and zoom the screen.</string>
+	<key>NSHumanReadableCopyright</key>
+	<string>Copyright © 2026 Eyal Ben-Simon. All rights reserved.</string>
 </dict>
 </plist>
