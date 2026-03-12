@@ -37,6 +37,7 @@ fastlane/test_output/
 *.ipa
 *.dSYM.zip
 *.dSYM
+*.app
 
 # macOS
 .DS_Store

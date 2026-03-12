@@ -3,6 +3,7 @@ import SwiftUI
 @main
 struct ZoomThisApp: App {
     @State private var appState = AppState()
+    private static var didAutoOpenSettings = false
     @Environment(\.openWindow) private var openWindow
 
     private var zoomShortcut: String {
@@ -13,7 +14,19 @@ struct ZoomThisApp: App {
         shortcutString(keyCode: appState.timerHotkeyKeyCode, modifiers: appState.timerHotkeyModifiers)
     }
 
+    private func autoOpenSettingsIfNeeded() {
+        guard !Self.didAutoOpenSettings else { return }
+        guard appState.isFirstRun || appState.showSettingsOnLaunch else { return }
+        Self.didAutoOpenSettings = true
+        DispatchQueue.main.async {
+            NSApp.setActivationPolicy(.regular)
+            openWindow(id: "settings")
+            NSApp.activate(ignoringOtherApps: true)
+        }
+    }
+
     var body: some Scene {
+        let _ = autoOpenSettingsIfNeeded()
         MenuBarExtra("ZoomThis", systemImage: "plus.magnifyingglass") {
             Button("Zoom \(zoomShortcut)") {
                 Task { await appState.activateZoom() }
@@ -34,8 +47,9 @@ struct ZoomThisApp: App {
             Divider()
 
             Button("Settings...") {
+                NSApp.setActivationPolicy(.regular)
                 openWindow(id: "settings")
-                NSApplication.shared.activate()
+                NSApp.activate(ignoringOtherApps: true)
             }
 
             Divider()
@@ -48,8 +62,14 @@ struct ZoomThisApp: App {
         Window("ZoomThis Settings", id: "settings") {
             SettingsView()
                 .environment(appState)
+                .onAppear {
+                    NSApp.setActivationPolicy(.regular)
+                }
+                .onDisappear {
+                    NSApp.setActivationPolicy(.accessory)
+                }
         }
-        .defaultSize(width: 640, height: 480)
+        .defaultSize(width: 520, height: 420)
         .windowResizability(.contentSize)
     }
 }

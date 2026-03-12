@@ -29,6 +29,10 @@ final class AppState {
     var defaultTextFontName: String = "Helvetica"
     var defaultTextFontSize: CGFloat = 24.0
 
+    // General
+    var showSettingsOnLaunch: Bool = true
+    var isFirstRun: Bool { UserDefaults.standard.object(forKey: "hotkeyKeyCode") == nil }
+
     // State
     var isZoomActive = false
     var isTimerActive = false
@@ -207,6 +211,9 @@ final class AppState {
         if defaults.object(forKey: "defaultTextFontSize") != nil {
             defaultTextFontSize = CGFloat(defaults.double(forKey: "defaultTextFontSize"))
         }
+        if defaults.object(forKey: "showSettingsOnLaunch") != nil {
+            showSettingsOnLaunch = defaults.bool(forKey: "showSettingsOnLaunch")
+        }
     }
 
     func saveSettings() {
@@ -222,5 +229,6 @@ final class AppState {
         defaults.set(Double(defaultPenThickness), forKey: "defaultPenThickness")
         defaults.set(defaultTextFontName, forKey: "defaultTextFontName")
         defaults.set(Double(defaultTextFontSize), forKey: "defaultTextFontSize")
+        defaults.set(showSettingsOnLaunch, forKey: "showSettingsOnLaunch")
     }
 }

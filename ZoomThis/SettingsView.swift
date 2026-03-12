@@ -23,13 +23,28 @@ struct HotkeyRecorderView: View {
                 .font(.system(.body, design: .monospaced))
                 .padding(.horizontal, 8)
                 .padding(.vertical, 4)
-                .background(.quaternary)
-                .cornerRadius(6)
+                .background(
+                    RoundedRectangle(cornerRadius: 6)
+                        .fill(.secondary.opacity(0.12))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 6)
+                        .strokeBorder(.primary.opacity(0.1), lineWidth: 1)
+                )
 
-            Button(isRecording ? "Press keys..." : "Record") {
-                startRecording()
+            if isRecording {
+                Text("Press keys...")
+                    .foregroundStyle(.secondary)
+                    .phaseAnimator([false, true]) { content, phase in
+                        content.opacity(phase ? 0.3 : 1.0)
+                    } animation: { _ in
+                        .easeInOut(duration: 0.7)
+                    }
+            } else {
+                Button("Record") { startRecording() }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.regular)
             }
-            .disabled(isRecording)
         }
         .onDisappear { cancelRecording() }
     }
@@ -41,7 +56,6 @@ struct HotkeyRecorderView: View {
         isRecording = true
         localMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
             if event.keyCode == 53 {
-                // Escape: revert to saved values and re-register
                 keyCode = savedKeyCode
                 modifiers = savedModifiers
                 onChange()
@@ -74,82 +88,57 @@ struct HotkeyRecorderView: View {
     }
 }
 
-// MARK: - Settings Tab Enum
-
-private enum SettingsTab: String, CaseIterable {
-    case zoom = "Zoom"
-    case timer = "Timer"
-    case about = "About"
-}
-
 // MARK: - Main Settings View
 
 struct SettingsView: View {
     @Environment(AppState.self) private var appState
-    @State private var selectedTab: SettingsTab = .zoom
 
     private var showPermissionOverlay: Bool {
         !appState.hasScreenRecordingPermission
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            ZStack {
-                settingsContent
-                    .blur(radius: showPermissionOverlay ? 8 : 0)
-                    .allowsHitTesting(!showPermissionOverlay)
-
-                if showPermissionOverlay {
-                    permissionOverlay
-                        .transition(.opacity.combined(with: .scale(scale: 0.95)))
-                }
+        Group {
+            if showPermissionOverlay {
+                permissionView
+            } else {
+                settingsTabView
             }
-            .animation(.easeInOut(duration: 0.3), value: showPermissionOverlay)
-            Divider()
-            statusBar
         }
-        .frame(width: 640, height: 480)
+        .animation(.easeInOut(duration: 0.3), value: showPermissionOverlay)
+        .frame(width: 520, height: 420)
         .onAppear { appState.startPermissionPolling() }
         .onDisappear { appState.stopPermissionPolling() }
     }
 
-    // MARK: - Settings Content
+    // MARK: - Settings Tab View
 
-    private var settingsContent: some View {
-        VStack(spacing: 0) {
-            Picker("", selection: $selectedTab) {
-                ForEach(SettingsTab.allCases, id: \.self) { tab in
-                    Text(tab.rawValue).tag(tab)
-                }
-            }
-            .pickerStyle(.segmented)
-            .padding(.horizontal, 20)
-            .padding(.top, 12)
-            .padding(.bottom, 8)
-
-            switch selectedTab {
-            case .zoom:
-                zoomTab
-            case .timer:
-                timerTab
-            case .about:
+    private var settingsTabView: some View {
+        TabView {
+            Tab("About", systemImage: "info.circle") {
                 aboutTab
+            }
+            Tab("Zoom", systemImage: "plus.magnifyingglass") {
+                zoomTab
+            }
+            Tab("Timer", systemImage: "timer") {
+                timerTab
             }
         }
     }
 
-    // MARK: - Permission Overlay
+    // MARK: - Permission View
 
-    private var permissionOverlay: some View {
-        ZStack {
-            Rectangle()
-                .fill(.ultraThinMaterial)
+    private var permissionView: some View {
+        VStack(spacing: 16) {
+            Spacer()
 
-            VStack(spacing: 20) {
-                Image(nsImage: NSApplication.shared.applicationIconImage)
-                    .resizable()
-                    .frame(width: 64, height: 64)
+            Image(nsImage: NSApplication.shared.applicationIconImage)
+                .resizable()
+                .frame(width: 64, height: 64)
+                .shadow(color: .black.opacity(0.15), radius: 8, y: 4)
 
+            VStack(spacing: 6) {
                 Text("ZoomThis needs Screen Recording")
                     .font(.title2.bold())
 
@@ -157,26 +146,29 @@ struct SettingsView: View {
                     .font(.callout)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
-
-                Button("Open System Settings") {
-                    appState.permissionManager.openScreenRecordingSettings()
-                }
-                .controlSize(.large)
+                    .frame(maxWidth: 300)
             }
-            .padding(32)
+
+            Button("Open System Settings") {
+                appState.permissionManager.requestPermission()
+                appState.permissionManager.openScreenRecordingSettings()
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.large)
+
+            Spacer()
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     // MARK: - Zoom Tab
 
     private var zoomTab: some View {
         @Bindable var appState = appState
-        return VStack(alignment: .leading, spacing: 12) {
-            // ACTIVATION
-            sectionHeader("ACTIVATION")
-            VStack(spacing: 8) {
+        return Form {
+            Section {
                 HotkeyRecorderView(
-                    label: "Zoom shortcut:",
+                    label: "Zoom shortcut",
                     keyCode: $appState.hotkeyKeyCode,
                     modifiers: $appState.hotkeyModifiers,
                     onStartRecording: {
@@ -186,97 +178,64 @@ struct SettingsView: View {
                     appState.saveSettings()
                     appState.registerHotkey()
                 }
-
-                HStack {
-                    Text("Magnification:")
-                    Slider(value: $appState.initialZoomFactor, in: 1.25...4.0, step: 0.25)
-                    Text(String(format: "%.2fx", appState.initialZoomFactor))
-                        .font(.system(.body, design: .monospaced))
-                        .frame(width: 50, alignment: .trailing)
-                }
-                .onChange(of: appState.initialZoomFactor) { _, _ in appState.saveSettings() }
-
-                Toggle("Animate zoom in/out", isOn: $appState.zoomAnimationEnabled)
-                    .onChange(of: appState.zoomAnimationEnabled) { _, _ in appState.saveSettings() }
+            } header: {
+                Text("Activation")
+            } footer: {
+                Text("Zoom in and annotate any part of your screen.")
             }
-            .padding(.horizontal, 20)
 
-            // DRAWING
-            sectionHeader("DRAWING")
-            VStack(spacing: 8) {
-                HStack {
-                    Text("Pen color:")
-                    Spacer()
-                    Picker("", selection: $appState.defaultPenColor) {
-                        Text("Red").tag("red")
-                        Text("Green").tag("green")
-                        Text("Blue").tag("blue")
-                        Text("Yellow").tag("yellow")
-                        Text("Orange").tag("orange")
-                        Text("Pink").tag("pink")
+            Section("Keyboard Shortcuts") {
+                HStack(alignment: .top, spacing: 0) {
+                    VStack(alignment: .leading, spacing: 10) {
+                        shortcutSection("Navigation", shortcuts: [
+                            ("Mouse", "Pan viewport"),
+                            ("Scroll", "Zoom in/out"),
+                            ("Right-click", "Back to pan"),
+                            ("Escape", "Exit zoom"),
+                        ])
+
+                        shortcutSection("Drawing", shortcuts: [
+                            ("Click", "Freehand"),
+                            ("\u{21E7}+drag", "Line"),
+                            ("\u{2303}+drag", "Rectangle"),
+                            ("\u{2325}+drag", "Ellipse"),
+                            ("\u{2303}\u{21E7}+drag", "Arrow"),
+                        ])
                     }
-                    .pickerStyle(.segmented)
-                    .frame(maxWidth: 360)
-                }
-                .onChange(of: appState.defaultPenColor) { _, _ in appState.saveSettings() }
+                    .frame(maxWidth: .infinity, alignment: .leading)
 
-                HStack {
-                    Text("Pen thickness:")
-                    Slider(value: $appState.defaultPenThickness, in: 1...30, step: 1)
-                    Text(String(format: "%.0f", appState.defaultPenThickness))
-                        .font(.system(.body, design: .monospaced))
-                        .frame(width: 30, alignment: .trailing)
-                }
-                .onChange(of: appState.defaultPenThickness) { _, _ in appState.saveSettings() }
+                    Divider()
+                        .padding(.horizontal, 8)
 
-                HStack {
-                    Text("Font size:")
-                    Slider(value: $appState.defaultTextFontSize, in: 8...120, step: 2)
-                    Text(String(format: "%.0f", appState.defaultTextFontSize))
-                        .font(.system(.body, design: .monospaced))
-                        .frame(width: 30, alignment: .trailing)
+                    VStack(alignment: .leading, spacing: 10) {
+                        shortcutSection("Colors & Text", shortcuts: [
+                            ("R/G/B/Y/O/P", "Pen color"),
+                            ("\u{21E7}+color", "Highlight"),
+                            ("X", "Blur"),
+                            ("W / K / E", "Wht/Blk/Erase"),
+                            ("T / \u{21E7}T", "Text L/R"),
+                        ])
+
+                        shortcutSection("Actions", shortcuts: [
+                            ("\u{2303}Z", "Undo"),
+                            ("\u{2303}C / \u{2303}S", "Copy / Save"),
+                        ])
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                .onChange(of: appState.defaultTextFontSize) { _, _ in appState.saveSettings() }
             }
-            .padding(.horizontal, 20)
-
-            // QUICK REFERENCE
-            sectionHeader("QUICK REFERENCE")
-            quickReferenceCard {
-                twoColumnShortcuts([
-                    ("Mouse", "Pan viewport"),
-                    ("Scroll", "Zoom in/out"),
-                    ("Left-click", "Draw freehand"),
-                    ("Right-click", "Back to pan"),
-                    ("Shift+drag", "Line"),
-                    ("Ctrl+drag", "Rectangle"),
-                    ("Option+drag", "Ellipse"),
-                    ("Ctrl+Shift+drag", "Arrow"),
-                    ("R/G/B/Y/O/P", "Pen color"),
-                    ("Shift+color", "Highlight"),
-                    ("X", "Blur pen"),
-                    ("T / Shift+T", "Text L/R"),
-                    ("W / K / E", "White/Black/Erase"),
-                    ("Ctrl+Z", "Undo"),
-                    ("Ctrl+C / Ctrl+S", "Copy / Save"),
-                    ("Escape", "Exit zoom"),
-                ])
-            }
-
-            Spacer(minLength: 0)
         }
+        .formStyle(.grouped)
     }
 
     // MARK: - Timer Tab
 
     private var timerTab: some View {
         @Bindable var appState = appState
-        return VStack(alignment: .leading, spacing: 12) {
-            // ACTIVATION
-            sectionHeader("ACTIVATION")
-            VStack(spacing: 8) {
+        return Form {
+            Section {
                 HotkeyRecorderView(
-                    label: "Timer shortcut:",
+                    label: "Timer shortcut",
                     keyCode: $appState.timerHotkeyKeyCode,
                     modifiers: $appState.timerHotkeyModifiers,
                     onStartRecording: {
@@ -286,151 +245,100 @@ struct SettingsView: View {
                     appState.saveSettings()
                     appState.registerTimerHotkey()
                 }
+            } header: {
+                Text("Activation")
+            } footer: {
+                Text("Full-screen countdown timer for breaks and presentations.")
             }
-            .padding(.horizontal, 20)
 
-            // DEFAULTS
-            sectionHeader("DEFAULTS")
-            VStack(spacing: 8) {
-                HStack {
-                    Text("Duration (minutes):")
-                    Stepper(
-                        value: Binding(
-                            get: { Int(appState.defaultTimerDuration / 60) },
-                            set: { appState.defaultTimerDuration = TimeInterval($0 * 60) }
-                        ),
-                        in: 1...120
-                    ) {
-                        Text("\(Int(appState.defaultTimerDuration / 60))")
-                            .font(.system(.body, design: .monospaced))
-                    }
+            Section("Keyboard Shortcuts") {
+                VStack(alignment: .leading, spacing: 10) {
+                    shortcutSection(nil, shortcuts: [
+                        ("Scroll / \u{2191}\u{2193}", "\u{00B1}10s"),
+                        ("\u{2303}+Scroll", "\u{00B1}30s"),
+                        ("Escape", "Dismiss"),
+                        ("Lose focus", "Minimize"),
+                        ("Hotkey", "Restore"),
+                    ])
                 }
-                .onChange(of: appState.defaultTimerDuration) { _, _ in appState.saveSettings() }
             }
-            .padding(.horizontal, 20)
+        }
+        .formStyle(.grouped)
+    }
 
-            // QUICK REFERENCE
-            sectionHeader("QUICK REFERENCE")
-            quickReferenceCard {
-                twoColumnShortcuts([
-                    ("Scroll / Up/Down", "+/- 10 seconds"),
-                    ("Ctrl+Scroll/arrows", "+/- 30 seconds"),
-                    ("Escape", "Dismiss timer"),
-                    ("Loses focus", "Minimizes to menu"),
-                    ("Hotkey again", "Restore if minimized"),
-                ])
+    private func shortcutSection(_ title: String?, shortcuts: [(String, String)]) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            if let title {
+                Text(title)
+                    .font(.caption.bold())
+                    .foregroundStyle(.secondary)
             }
 
-            Spacer(minLength: 0)
+            ForEach(Array(shortcuts.enumerated()), id: \.offset) { _, item in
+                shortcutRow(key: item.0, description: item.1)
+            }
+        }
+    }
+
+    private func shortcutRow(key: String, description: String) -> some View {
+        HStack(spacing: 6) {
+            Text(key)
+                .font(.system(.caption, design: .monospaced).weight(.medium))
+                .frame(width: 85, alignment: .trailing)
+            Text(description)
+                .font(.caption)
+                .foregroundStyle(.secondary)
         }
     }
 
     // MARK: - About Tab
 
     private var aboutTab: some View {
-        VStack(spacing: 12) {
+        VStack(spacing: 0) {
             Spacer()
 
             Image(nsImage: NSApplication.shared.applicationIconImage)
                 .resizable()
                 .frame(width: 80, height: 80)
+                .shadow(color: .black.opacity(0.15), radius: 10, y: 4)
 
             Text("ZoomThis")
                 .font(.title.bold())
+                .padding(.top, 12)
 
-            Text("Version \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.0")")
+            Text("Version \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.0") (\(Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "1"))")
                 .font(.callout)
                 .foregroundStyle(.secondary)
+                .padding(.top, 2)
 
             Text("Screen zoom, annotation, and break timer tool for macOS.")
                 .font(.callout)
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-                .padding(.horizontal, 40)
-
-            Spacer()
-        }
-        .frame(maxWidth: .infinity)
-    }
-
-    // MARK: - Status Bar
-
-    private var statusBar: some View {
-        HStack(spacing: 16) {
-            HStack(spacing: 4) {
-                Circle()
-                    .fill(appState.hasScreenRecordingPermission ? .green : .red)
-                    .frame(width: 8, height: 8)
-                Text("Screen Recording")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-            .onTapGesture {
-                if !appState.hasScreenRecordingPermission {
-                    appState.permissionManager.openScreenRecordingSettings()
-                }
-            }
+                .foregroundStyle(.tertiary)
+                .padding(.top, 2)
 
             Spacer()
 
-            Toggle("Launch at Login", isOn: Binding(
-                get: { appState.isLaunchAtLoginEnabled },
-                set: { _ in appState.toggleLaunchAtLogin() }
-            ))
-            .toggleStyle(.checkbox)
-            .font(.callout)
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 10)
-    }
+            Form {
+                Section {
+                    Toggle("Show Settings on Launch", isOn: Binding(
+                        get: { appState.showSettingsOnLaunch },
+                        set: { newValue in
+                            appState.showSettingsOnLaunch = newValue
+                            appState.saveSettings()
+                        }
+                    ))
+                    .toggleStyle(.switch)
 
-    // MARK: - Helpers
-
-    private func sectionHeader(_ title: String) -> some View {
-        Text(title)
-            .font(.caption.bold())
-            .foregroundStyle(.secondary)
-            .padding(.horizontal, 20)
-            .padding(.top, 4)
-    }
-
-    private func quickReferenceCard<Content: View>(@ViewBuilder content: () -> Content) -> some View {
-        content()
-            .padding(10)
-            .background(.quaternary.opacity(0.5))
-            .cornerRadius(8)
-            .padding(.horizontal, 20)
-    }
-
-    private func twoColumnShortcuts(_ items: [(String, String)]) -> some View {
-        let midpoint = (items.count + 1) / 2
-        let leftColumn = Array(items.prefix(midpoint))
-        let rightColumn = Array(items.suffix(from: midpoint))
-
-        return HStack(alignment: .top, spacing: 16) {
-            VStack(alignment: .leading, spacing: 2) {
-                ForEach(Array(leftColumn.enumerated()), id: \.offset) { _, item in
-                    dotLeaderRow(key: item.0, desc: item.1)
+                    Toggle("Launch at Login", isOn: Binding(
+                        get: { appState.isLaunchAtLoginEnabled },
+                        set: { _ in appState.toggleLaunchAtLogin() }
+                    ))
+                    .toggleStyle(.switch)
                 }
             }
-            VStack(alignment: .leading, spacing: 2) {
-                ForEach(Array(rightColumn.enumerated()), id: \.offset) { _, item in
-                    dotLeaderRow(key: item.0, desc: item.1)
-                }
-            }
-        }
-    }
-
-    private func dotLeaderRow(key: String, desc: String) -> some View {
-        HStack(spacing: 4) {
-            Text(key)
-                .font(.system(.caption, design: .monospaced))
-                .frame(width: 120, alignment: .leading)
-                .lineLimit(1)
-            Text(desc)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
+            .formStyle(.grouped)
+            .scrollDisabled(true)
+            .fixedSize(horizontal: false, vertical: true)
         }
     }
 }
@@ -443,10 +351,10 @@ func shortcutString(keyCode: UInt32, modifiers: UInt32) -> String {
 
 func carbonModifiersToString(_ modifiers: UInt32) -> String {
     var result = ""
-    if modifiers & UInt32(controlKey) != 0 { result += "⌃" }
-    if modifiers & UInt32(optionKey) != 0 { result += "⌥" }
-    if modifiers & UInt32(shiftKey) != 0 { result += "⇧" }
-    if modifiers & UInt32(cmdKey) != 0 { result += "⌘" }
+    if modifiers & UInt32(controlKey) != 0 { result += "\u{2303}" }
+    if modifiers & UInt32(optionKey) != 0 { result += "\u{2325}" }
+    if modifiers & UInt32(shiftKey) != 0 { result += "\u{21E7}" }
+    if modifiers & UInt32(cmdKey) != 0 { result += "\u{2318}" }
     return result
 }
 
@@ -496,7 +404,7 @@ func keyCodeToString(_ keyCode: UInt32) -> String {
     case 33: return "["
     case 34: return "I"
     case 35: return "P"
-    case 36: return "↩"
+    case 36: return "\u{21A9}"
     case 37: return "L"
     case 38: return "J"
     case 39: return "'"
@@ -508,11 +416,11 @@ func keyCodeToString(_ keyCode: UInt32) -> String {
     case 45: return "N"
     case 46: return "M"
     case 47: return "."
-    case 48: return "⇥"
+    case 48: return "\u{21E5}"
     case 49: return "Space"
     case 50: return "`"
-    case 51: return "⌫"
-    case 53: return "⎋"
+    case 51: return "\u{232B}"
+    case 53: return "\u{238B}"
     default: return "Key\(keyCode)"
     }
 }
