@@ -1,5 +1,10 @@
 import AppKit
 import ScreenCaptureKit
+import os.log
+
+private extension Logger {
+    static let capture = Logger(subsystem: Bundle.main.bundleIdentifier ?? "ZoomThis", category: "capture")
+}
 
 final class ScreenCaptureManager {
 
@@ -40,6 +45,7 @@ final class ScreenCaptureManager {
             )
             return CaptureResult(image: image, screen: screen)
         } catch {
+            Logger.capture.error("Screen capture failed: \(error)")
             return nil
         }
     }
