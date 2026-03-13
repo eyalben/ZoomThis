@@ -68,7 +68,7 @@ Full-screen countdown timer for structured breaks. Minimizes to the menu bar whe
 
 ## Requirements
 
-- macOS 13 Ventura or later
+- macOS 15 Sequoia or later
 - Screen Recording permission (prompted on first use)
 
 ## Installation
