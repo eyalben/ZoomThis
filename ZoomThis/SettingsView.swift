@@ -315,6 +315,10 @@ struct SettingsView: View {
                 .foregroundStyle(.tertiary)
                 .padding(.top, 2)
 
+            Link("GitHub", destination: URL(string: "https://github.com/eyalben/ZoomThis")!)
+                .font(.callout)
+                .padding(.top, 4)
+
             Spacer()
 
             Form {
