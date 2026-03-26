@@ -51,8 +51,8 @@ final class AppState {
         loadSettings()
         registerHotkey()
         registerTimerHotkey()
-        hasScreenRecordingPermission = permissionManager.hasScreenRecordingPermission()
         isLaunchAtLoginEnabled = SMAppService.mainApp.status == .enabled
+        checkPermissions()
     }
 
     // MARK: - Permission Polling
@@ -63,6 +63,9 @@ final class AppState {
             guard let self else { return }
             Task { @MainActor [weak self] in
                 self?.checkPermissions()
+                if self?.hasScreenRecordingPermission == true {
+                    self?.stopPermissionPolling()
+                }
             }
         }
     }

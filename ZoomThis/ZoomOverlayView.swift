@@ -41,6 +41,7 @@ final class ZoomOverlayView: NSView {
         fatalError()
     }
 
+    override var isOpaque: Bool { true }
     override var acceptsFirstResponder: Bool { true }
 
     override func keyDown(with event: NSEvent) {
@@ -124,7 +125,7 @@ final class ZoomOverlayView: NSView {
             height: image.height,
             bitsPerComponent: 8,
             bytesPerRow: 0,
-            space: CGColorSpaceCreateDeviceRGB(),
+            space: image.colorSpace ?? CGColorSpaceCreateDeviceRGB(),
             bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
         ) else { return nil }
 
@@ -204,7 +205,7 @@ final class ZoomOverlayView: NSView {
             height: image.height,
             bitsPerComponent: 8,
             bytesPerRow: 0,
-            space: CGColorSpaceCreateDeviceRGB(),
+            space: image.colorSpace ?? CGColorSpaceCreateDeviceRGB(),
             bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
         ) else { return }
 
@@ -309,7 +310,7 @@ final class ZoomOverlayView: NSView {
             height: height,
             bitsPerComponent: 8,
             bytesPerRow: 0,
-            space: CGColorSpaceCreateDeviceRGB(),
+            space: image.colorSpace ?? CGColorSpaceCreateDeviceRGB(),
             bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
         ) else { return nil }
 
@@ -346,7 +347,7 @@ final class ZoomOverlayView: NSView {
             height: height,
             bitsPerComponent: 8,
             bytesPerRow: 0,
-            space: CGColorSpaceCreateDeviceRGB(),
+            space: image.colorSpace ?? CGColorSpaceCreateDeviceRGB(),
             bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
         ) else { return nil }
 

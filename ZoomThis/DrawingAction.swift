@@ -126,7 +126,7 @@ enum DrawingAction {
             let smallH = max(1, Int(imageSize.height * 0.08))
             if let smallContext = CGContext(data: nil, width: smallW, height: smallH,
                                             bitsPerComponent: 8, bytesPerRow: 0,
-                                            space: CGColorSpaceCreateDeviceRGB(),
+                                            space: sourceImage.colorSpace ?? CGColorSpaceCreateDeviceRGB(),
                                             bitmapInfo: CGImageAlphaInfo.premultipliedFirst.rawValue) {
                 smallContext.interpolationQuality = .none
                 smallContext.draw(sourceImage, in: CGRect(x: 0, y: 0, width: smallW, height: smallH))
