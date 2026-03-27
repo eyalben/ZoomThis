@@ -918,8 +918,8 @@ final class ZoomOverlayController {
         animationTimer?.invalidate()
         let startTime = CACurrentMediaTime()
 
-        animationTimer = Timer.scheduledTimer(withTimeInterval: 1.0 / 60.0, repeats: true) { [weak self] timer in
-            guard let self else { timer.invalidate(); return }
+        let timer = Timer.scheduledTimer(withTimeInterval: 1.0 / 60.0, repeats: true) { [weak self] timer in
+            guard let self else { timer.invalidate(); completion(); return }
 
             let progress = min((CACurrentMediaTime() - startTime) / self.animationDuration, 1.0)
             let eased = 1.0 - (1.0 - progress) * (1.0 - progress)
@@ -931,6 +931,9 @@ final class ZoomOverlayController {
                 completion()
             }
         }
+        // Run in .common modes so the timer fires during menu tracking too
+        RunLoop.current.add(timer, forMode: .common)
+        animationTimer = timer
     }
 
     private func cleanup() {

@@ -6,14 +6,6 @@ struct ZoomThisApp: App {
     @Environment(\.openWindow) private var openWindow
     private static var didAutoOpenSettings = false
 
-    private var zoomShortcut: String {
-        shortcutString(keyCode: appState.hotkeyKeyCode, modifiers: appState.hotkeyModifiers)
-    }
-
-    private var timerShortcut: String {
-        shortcutString(keyCode: appState.timerHotkeyKeyCode, modifiers: appState.timerHotkeyModifiers)
-    }
-
     private var shouldAutoOpenSettings: Bool {
         guard !Self.didAutoOpenSettings else { return false }
         return appState.isFirstRun || appState.showSettingsOnLaunch
@@ -21,14 +13,16 @@ struct ZoomThisApp: App {
 
     var body: some Scene {
         MenuBarExtra("ZoomThis", systemImage: "plus.magnifyingglass") {
-            Button("Zoom \(zoomShortcut)") {
+            Button("Zoom") {
                 Task { await appState.activateZoom() }
             }
+            .hotkeyShortcut(keyCode: appState.hotkeyKeyCode, modifiers: appState.hotkeyModifiers)
             .disabled(appState.isZoomActive || appState.isTimerActive)
 
-            Button("Break Timer \(timerShortcut)") {
+            Button("Break Timer") {
                 appState.activateTimer()
             }
+            .hotkeyShortcut(keyCode: appState.timerHotkeyKeyCode, modifiers: appState.timerHotkeyModifiers)
             .disabled(appState.isZoomActive || (appState.isTimerActive && !appState.breakTimerController.isMinimized))
 
             if appState.isTimerActive && appState.breakTimerController.isMinimized {

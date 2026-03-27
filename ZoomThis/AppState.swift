@@ -121,6 +121,7 @@ final class AppState {
 
     func activateZoom() async {
         if isZoomActive {
+            isZoomActive = false
             overlayController.dismiss()
             return
         }
