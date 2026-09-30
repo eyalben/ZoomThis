@@ -1,7 +1,10 @@
 import AppKit
 
 final class DrawingState {
-    var actions: [DrawingAction] = []
+    private(set) var revision: UInt64 = 0
+    var actions: [DrawingAction] = [] {
+        didSet { revision &+= 1 }
+    }
     var currentColor: NSColor = .red
     var currentLineWidth: CGFloat = 3.0
     var isBlurMode = false

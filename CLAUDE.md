@@ -21,7 +21,7 @@ Bundle ID: `com.ebs.ZoomThis`. The app is sandboxed (`com.apple.security.app-san
 
 ## Architecture
 
-ZoomThis is a **menu bar app** (no dock icon) with two full-screen overlay modes: **Zoom** and **Break Timer**. Both modes capture the full screen and display content in a borderless `NSPanel` at `.screenSaver` window level.
+ZoomThis is a **menu bar app** (no dock icon) with two full-screen overlay modes: **Zoom** and **Break Timer**. Zoom captures the full screen; the timer displays a countdown. Both use borderless `NSPanel` windows at `.normal` level so system dialogs and other apps remain reachable. Each visible overlay registers an unsuspended global Escape shortcut and removes it on dismissal.
 
 ### Core flow
 
@@ -35,7 +35,7 @@ The zoom pipeline is: `ScreenCaptureManager` (captures via ScreenCaptureKit) →
 
 **`ZoomOverlayController`** implements a three-mode state machine: **Panning → Drawing → TextInput**. All keyboard/mouse events flow through `handleEvent()` which dispatches to the current mode's handler. Mode transitions are documented in the class's doc comment. Key design details:
 
-- Events are intercepted via `NSEvent.addLocalMonitorForEvents` + a global monitor for Escape
+- Normal input uses `NSEvent.addLocalMonitorForEvents`; Escape also uses a Carbon global hotkey, panel responder cancellation, and immediate focus-loss cleanup
 - Drawing tool selection is modifier-key-based (Shift=line, Ctrl=rect, Option=ellipse, Ctrl+Shift=arrow)
 - Coordinates convert between screen space, view space, and image space via `imagePoint(from:)` / `viewPoint(from:)`
 - Export (copy/save) renders the current view including annotations; crop export uses a drag-to-select interaction
@@ -50,7 +50,7 @@ The zoom pipeline is: `ScreenCaptureManager` (captures via ScreenCaptureKit) →
 
 ### Supporting types
 
-- **`HotkeyManager`** — registers global/local keyboard shortcuts via `NSEvent` monitors (not Carbon `RegisterEventHotKey`). Converts between Cocoa `NSEvent.ModifierFlags` and Carbon modifier constants.
+- **`HotkeyManager`** — registers global keyboard shortcuts via Carbon `RegisterEventHotKey`. Normal shortcuts suspend during menu tracking; emergency Escape registrations opt out of suspension. Returns registration success so overlays can refuse to open without an exit shortcut.
 - **`ModifierUtils`** — standalone functions for modifier/keycode string conversion (used in settings UI and hotkey display).
 - **`OverlayPanel`** — trivial `NSPanel` subclass that returns `true` for `canBecomeKey`/`canBecomeMain`.
 - **`ToolTipHUD`** — ephemeral bottom-left tooltip panel showing active color/tool with auto-fade.
@@ -65,5 +65,5 @@ The zoom pipeline is: `ScreenCaptureManager` (captures via ScreenCaptureKit) →
 
 - **No SwiftUI for overlays** — the zoom and timer overlays use AppKit `NSView` + CoreGraphics for performance and precise event control. SwiftUI is only used for the settings window and menu bar.
 - **Coordinate systems** — image coordinates are Y-down (CGImage convention). View coordinates are Y-up (AppKit convention). The `ZoomOverlayView` handles conversion. Drawing contexts are explicitly flipped to Y-down before rendering.
-- **No Carbon framework import** — modifier constants are defined locally in `ModifierUtils.swift` to maintain sandbox compatibility.
+- **Carbon hotkeys** — `HotkeyManager` imports `Carbon.HIToolbox` for global shortcuts. Display and recorder modifier constants remain local to `ModifierUtils.swift`.
 - **Logging** — uses `os.log` (`Logger`) instead of `print`/`NSLog`.

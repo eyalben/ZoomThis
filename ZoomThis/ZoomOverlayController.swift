@@ -1,5 +1,8 @@
 import AppKit
 import UniformTypeIdentifiers
+import os
+
+private let overlayLogger = Logger(subsystem: Bundle.main.bundleIdentifier ?? "ZoomThis", category: "overlay")
 
 enum OverlayMode {
     case panning
@@ -22,22 +25,25 @@ enum DrawingTool {
 /// ┌──────────┐  left-click   ┌──────────┐   T / Shift+T   ┌───────────┐
 /// │ Panning  │──────────────▶│ Drawing  │───────────────▶│ TextInput │
 /// │          │◀──────────────│          │◀───────────────│           │
-/// └──────────┘  right-click  └──────────┘   Esc (commit)  └───────────┘
+/// └──────────┘  right-click  └──────────┘ Return (commit) └───────────┘
 ///       │                         │              │
-///       │ right-click / Esc       │ Esc          │ right-click (commit)
+///       │ right-click / Esc       │ Esc          │ Esc
 ///       ▼                         ▼              ▼
-///   [dismiss]                 [dismiss]      [→ Panning]
+///   [dismiss]                 [dismiss]       [dismiss]
 /// ```
 ///
 /// - **Panning**: mouse moves pan the viewport, scroll zooms, left-click enters drawing, right-click/Esc dismisses.
 /// - **Drawing**: left-drag draws strokes (tool chosen by modifiers), right-click returns to panning, Esc dismisses.
-/// - **TextInput**: keystrokes fill a text buffer, Esc commits text and returns to drawing,
-///   right-click commits text and returns to panning.
+/// - **TextInput**: keystrokes fill a text buffer, Return commits text and returns to drawing,
+///   right-click commits text and returns to panning. Escape immediately exits every mode.
 final class ZoomOverlayController {
-    private var window: NSWindow?
+    private static let escapeHotkeyID = UInt32.max
+    private let escapeHotkeyManager = HotkeyManager()
+    private var window: OverlayPanel?
     private var zoomView: ZoomOverlayView?
     private var localEventMonitor: Any?
-    private var globalEventMonitor: Any?
+    private var focusObservers: [Any] = []
+    private var savePanel: NSSavePanel?
     private var onDismiss: (() -> Void)?
     private(set) var isDismissing = false
     private var animationTimer: Timer?
@@ -60,6 +66,7 @@ final class ZoomOverlayController {
     private var textBuffer: String = ""
     private var textInsertionPoint: CGPoint = .zero // image coords
     private var textFontSize: CGFloat = 24.0
+    private var textFontName = "Helvetica"
     private var textAlignment: NSTextAlignment = .left
     private var cursorBlinkTimer: Timer?
     private var cursorVisible = true
@@ -76,14 +83,27 @@ final class ZoomOverlayController {
         case save
     }
 
-    func show(image: CGImage, screen: NSScreen, initialZoom: CGFloat = 2.0, animateIn: Bool = true, defaultColor: NSColor = .red, defaultLineWidth: CGFloat = 3.0, defaultTextFontSize: CGFloat = 24.0, onDismiss: @escaping () -> Void) {
+    func show(image: CGImage, screen: NSScreen, initialZoom: CGFloat = 2.0, animateIn: Bool = true, defaultColor: NSColor = .red, defaultLineWidth: CGFloat = 3.0, defaultTextFontSize: CGFloat = 24.0, defaultTextFontName: String = "Helvetica", onDismiss: @escaping () -> Void) {
         // Safety net: tear down any prior session that wasn't fully cleaned up
         cleanup()
 
         self.onDismiss = onDismiss
+        // Register an OS hotkey before showing anything. This remains available even when
+        // AppKit routes keyboard events to another window or runs a menu's tracking loop.
+        guard escapeHotkeyManager.register(id: Self.escapeHotkeyID, keyCode: 53, modifiers: 0, suspendDuringMenuTracking: false, callback: { [weak self] in
+            // Carbon application-target handlers execute on the main event thread. Dismiss
+            // synchronously; queuing a Task could leave it waiting behind a tracking loop.
+            MainActor.assumeIsolated { self?.dismiss(animated: false) }
+        }) else {
+            overlayLogger.error("Zoom refused to open: the global Escape shortcut is unavailable")
+            cleanup()
+            return
+        }
+        overlayLogger.notice("Global Escape exit armed")
         self.targetZoom = initialZoom
         self.animateIn = animateIn
         self.textFontSize = defaultTextFontSize
+        self.textFontName = defaultTextFontName
         drawingState.reset(color: defaultColor, lineWidth: defaultLineWidth)
         panningMousePosition = .zero
         isCropDragging = false
@@ -96,10 +116,11 @@ final class ZoomOverlayController {
             backing: .buffered,
             defer: false
         )
-        window.level = .screenSaver
+        // Keep system dialogs and other applications reachable even if this app stalls.
+        window.level = .normal
         window.isOpaque = true
         window.hasShadow = false
-        window.hidesOnDeactivate = false
+        window.hidesOnDeactivate = true
         window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         window.backgroundColor = .black
 
@@ -109,19 +130,20 @@ final class ZoomOverlayController {
         window.contentView = zoomView
         self.zoomView = zoomView
         self.window = window
+        window.onCancel = { [weak self] in self?.dismiss(animated: false) }
 
+        // Install Escape handling before activation and the entrance animation.
+        startEventMonitor()
+        observeFocusChanges()
         zoomView.updateMousePosition(NSEvent.mouseLocation)
         NSApp.activate(ignoringOtherApps: true)
         window.makeKeyAndOrderFront(nil)
         window.orderFrontRegardless()
         window.makeFirstResponder(zoomView)
+        overlayLogger.notice("Zoom presented: active=\(NSApp.isActive), isKey=\(window.isKeyWindow), overlayWindow=\(window.windowNumber), keyWindow=\(NSApp.keyWindow?.windowNumber ?? -1)")
 
         if animateIn {
-            animateZoom(from: 1.0, to: targetZoom) { [weak self] in
-                self?.startEventMonitor()
-            }
-        } else {
-            startEventMonitor()
+            animateZoom(from: 1.0, to: targetZoom, completion: {})
         }
     }
 
@@ -143,17 +165,49 @@ final class ZoomOverlayController {
             matching: [.keyDown, .flagsChanged, .mouseMoved, .leftMouseDragged, .rightMouseDragged,
                        .leftMouseDown, .leftMouseUp, .rightMouseDown, .scrollWheel]
         ) { [weak self] event in
-            self?.handleEvent(event) ?? event
-        }
-        // Global monitor catches Escape even when the app loses focus
-        globalEventMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { [weak self] event in
-            if event.keyCode == 53 { // Escape
-                self?.dismiss()
-            }
+            guard let self else { return event }
+            return self.handleEvent(event)
         }
     }
 
+    private func observeFocusChanges() {
+        let center = NotificationCenter.default
+        focusObservers = [
+            center.addObserver(forName: NSApplication.didResignActiveNotification, object: NSApp, queue: .main) { [weak self] _ in
+                // A global keyboard monitor requires Accessibility access. Remove the overlay
+                // on focus loss so it cannot cover another app while receiving no keyboard input.
+                overlayLogger.notice("Zoom app lost focus")
+                self?.dismiss(animated: false)
+            },
+            center.addObserver(forName: NSWindow.didResignKeyNotification, object: window, queue: .main) { [weak self] _ in
+                guard let self, self.savePanel == nil else { return }
+                overlayLogger.notice("Zoom window lost keyboard focus")
+                self.dismiss(animated: false)
+            },
+            center.addObserver(forName: NSApplication.didBecomeActiveNotification, object: NSApp, queue: .main) { [weak self] _ in
+                guard let self, let window = self.window, !self.isDismissing, self.savePanel == nil else { return }
+                window.makeKeyAndOrderFront(nil)
+                window.makeFirstResponder(self.zoomView)
+            }
+        ]
+    }
+
+    private func removeFocusObservers() {
+        for observer in focusObservers { NotificationCenter.default.removeObserver(observer) }
+        focusObservers.removeAll()
+    }
+
     private func handleEvent(_ event: NSEvent) -> NSEvent? {
+        if event.type == .keyDown, event.keyCode == 53 {
+            overlayLogger.notice("Local Escape: eventWindow=\(event.window?.windowNumber ?? -1), keyWindow=\(NSApp.keyWindow?.windowNumber ?? -1)")
+        }
+        guard let window, (event.window ?? NSApp.keyWindow) === window else { return event }
+        if event.type == .keyDown, event.keyCode == 53 {
+            dismiss(animated: false)
+            return nil
+        }
+        // Escape is available during animation; other input waits for a stable viewport.
+        guard animationTimer == nil else { return nil }
         switch mode {
         case .panning:
             return handlePanningEvent(event)
@@ -168,10 +222,7 @@ final class ZoomOverlayController {
 
     private func imagePoint(from screenPoint: NSPoint) -> CGPoint? {
         guard let zoomView else { return nil }
-        let viewPoint = NSPoint(
-            x: screenPoint.x - zoomView.frame.origin.x,
-            y: screenPoint.y - zoomView.frame.origin.y
-        )
+        let viewPoint = zoomView.viewPoint(fromScreen: screenPoint)
         return zoomView.imagePoint(from: viewPoint)
     }
 
@@ -202,9 +253,6 @@ final class ZoomOverlayController {
 
     private func handlePanningKeyDown(_ event: NSEvent) -> NSEvent? {
         switch event.keyCode {
-        case 53: // Escape
-            dismiss()
-            return nil
         case 126: // Up arrow
             adjustZoomByStep(0.5)
             return nil
@@ -294,9 +342,6 @@ final class ZoomOverlayController {
         let isShift = mods.contains(.shift)
 
         switch event.keyCode {
-        case 53: // Escape
-            dismiss()
-            return nil
         case 15: // R
             drawingState.currentColor = isShift ? NSColor.red.withAlphaComponent(0.3) : .red
             drawingState.isBlurMode = false
@@ -434,6 +479,8 @@ final class ZoomOverlayController {
     private func handleDrawingMouseDown(_ event: NSEvent) -> NSEvent? {
         guard let imgPt = imagePoint(from: NSEvent.mouseLocation) else { return nil }
         isDragging = true
+        activeTool = toolFromModifiers(event.modifierFlags)
+        zoomView?.inProgressAction = nil
         dragStart = imgPt
         dragCurrent = imgPt
         drawingState.inProgressPoints = [imgPt]
@@ -446,7 +493,9 @@ final class ZoomOverlayController {
         dragCurrent = imgPt
         drawingState.inProgressPoints.append(imgPt)
 
-        activeTool = toolFromModifiers(event.modifierFlags)
+        if event.type == .leftMouseDragged {
+            activeTool = toolFromModifiers(event.modifierFlags)
+        }
         let color = drawingState.currentColor
         let lineWidth = drawingState.currentLineWidth
 
@@ -477,6 +526,8 @@ final class ZoomOverlayController {
 
     private func handleDrawingMouseUp(_ event: NSEvent) -> NSEvent? {
         guard isDragging else { return nil }
+        // Include the release location, including a click with no drag events.
+        _ = handleDrawingMouseDrag(event)
         isDragging = false
 
         let color = drawingState.currentColor
@@ -517,13 +568,12 @@ final class ZoomOverlayController {
 
     // MARK: - Text Input Mode
     // Contract: keystrokes append to a text buffer shown as a live preview,
-    // Esc commits the text and returns to drawing, right-click commits and returns to panning,
+    // Escape exits zoom, Return commits the text and returns to drawing, right-click commits and returns to panning,
     // left-click commits current text and starts a new text entry at the click location.
 
     private func enterTextInputMode(_ alignment: NSTextAlignment) {
         textAlignment = alignment
         textBuffer = ""
-        textFontSize = 24.0
         cursorVisible = true
         hideCursorDot()
         hideCursor()
@@ -581,10 +631,10 @@ final class ZoomOverlayController {
         // Ctrl+C → copy
         if mods.contains(.control) && event.keyCode == 8 {
             if mods.contains(.shift) {
-                commitText()
+                finishTextInput()
                 startCropExport(.clipboard)
             } else {
-                commitText()
+                finishTextInput()
                 exportToClipboard()
             }
             return nil
@@ -592,22 +642,16 @@ final class ZoomOverlayController {
         // Ctrl+S → save
         if mods.contains(.control) && event.keyCode == 1 {
             if mods.contains(.shift) {
-                commitText()
+                finishTextInput()
                 startCropExport(.save)
             } else {
-                commitText()
+                finishTextInput()
                 exportSave()
             }
             return nil
         }
 
         switch event.keyCode {
-        case 53: // Escape → commit text and return to drawing
-            commitText()
-            mode = .drawing
-            stopCursorBlink()
-            updateCursorDot()
-            return nil
         case 51: // Backspace
             if !textBuffer.isEmpty {
                 textBuffer.removeLast()
@@ -642,13 +686,19 @@ final class ZoomOverlayController {
         }
     }
 
+    private func finishTextInput() {
+        commitText()
+        mode = .drawing
+        updateCursorDot()
+    }
+
     private func commitText() {
         stopCursorBlink()
         guard !textBuffer.isEmpty else {
             zoomView?.inProgressAction = nil
             return
         }
-        let font = NSFont.systemFont(ofSize: textFontSize)
+        let font = NSFont(name: textFontName, size: textFontSize) ?? NSFont.systemFont(ofSize: textFontSize)
         let action = DrawingAction.text(
             string: textBuffer,
             position: textInsertionPoint,
@@ -664,7 +714,7 @@ final class ZoomOverlayController {
 
     private func updateTextPreview() {
         let displayText = textBuffer + (cursorVisible ? "|" : " ")
-        let font = NSFont.systemFont(ofSize: textFontSize)
+        let font = NSFont(name: textFontName, size: textFontSize) ?? NSFont.systemFont(ofSize: textFontSize)
         zoomView?.inProgressAction = .text(
             string: displayText,
             position: textInsertionPoint,
@@ -693,6 +743,7 @@ final class ZoomOverlayController {
     // MARK: - Crop Export
 
     private func startCropExport(_ action: CropExportAction) {
+        mode = .drawing
         isCropMode = true
         cropExportAction = action
         isCropDragging = false
@@ -704,15 +755,14 @@ final class ZoomOverlayController {
 
     private func handleCropEvent(_ event: NSEvent) -> NSEvent? {
         switch event.type {
+        case .rightMouseDown:
+            isCropMode = false
+            isCropDragging = false
+            zoomView?.cropSelection = nil
+            hideCursor()
+            updateCursorDot()
+            return nil
         case .keyDown:
-            if event.keyCode == 53 { // Escape → cancel crop
-                isCropMode = false
-                zoomView?.cropSelection = nil
-                zoomView?.needsDisplay = true
-                hideCursor()
-                updateCursorDot()
-                return nil
-            }
             return event
         case .leftMouseDown:
             if let imgPt = imagePoint(from: NSEvent.mouseLocation) {
@@ -740,15 +790,14 @@ final class ZoomOverlayController {
                 zoomView?.cropSelection = nil
                 zoomView?.needsDisplay = true
 
+                hideCursor()
+                updateCursorDot()
                 switch cropExportAction {
                 case .clipboard:
                     exportRegionToClipboard(cropRect)
                 case .save:
                     exportRegionSave(cropRect)
                 }
-
-                hideCursor()
-                updateCursorDot()
             }
             return nil
         case .mouseMoved:
@@ -789,11 +838,25 @@ final class ZoomOverlayController {
     }
 
     private func savePNG(image: NSImage) {
+        guard savePanel == nil else { return }
+        unhideCursor()
+        hideCursorDot()
+        toolTipHUD.hide()
         let panel = NSSavePanel()
         panel.allowedContentTypes = [.png]
         panel.nameFieldStringValue = "ZoomThis Screenshot.png"
-        panel.level = .screenSaver + 1
-        panel.begin { response in
+        panel.level = .modalPanel
+        savePanel = panel
+        panel.begin { [weak self] response in
+            defer {
+                self?.savePanel = nil
+                if let self, let window = self.window, !self.isDismissing {
+                    window.makeKeyAndOrderFront(nil)
+                    window.makeFirstResponder(self.zoomView)
+                    self.hideCursor()
+                    self.updateCursorDot()
+                }
+            }
             guard response == .OK, let url = panel.url else { return }
             guard let tiff = image.tiffRepresentation,
                   let bitmap = NSBitmapImageRep(data: tiff),
@@ -813,6 +876,7 @@ final class ZoomOverlayController {
 
     private func enterDrawingMode() {
         panningMousePosition = NSEvent.mouseLocation
+        zoomView?.updateCursorDotPosition(panningMousePosition)
         mode = .drawing
         hideCursor()
         updateCursorDot()
@@ -820,12 +884,16 @@ final class ZoomOverlayController {
 
     private func returnToPanningMode() {
         mode = .panning
+        isDragging = false
+        drawingState.inProgressPoints.removeAll()
+        drawingState.inProgressOrigin = nil
+        zoomView?.inProgressAction = nil
         toolTipHUD.hide()
         hideCursorDot()
         hideCursor()
         // Warp cursor back to where it was when drawing mode was entered.
         // The cursor is hidden so the warp is invisible to the user.
-        let flippedY = NSScreen.main.map { $0.frame.height - panningMousePosition.y } ?? panningMousePosition.y
+        let flippedY = NSScreen.screens.first.map { $0.frame.maxY - panningMousePosition.y } ?? panningMousePosition.y
         CGWarpMouseCursorPosition(CGPoint(x: panningMousePosition.x, y: flippedY))
         zoomView?.updateMousePosition(panningMousePosition)
     }
@@ -835,6 +903,7 @@ final class ZoomOverlayController {
     private func updateCursorDot() {
         guard let zoomView else { return }
         let screenDiameter = drawingState.currentLineWidth * zoomView.zoomFactor
+            * zoomView.bounds.width / CGFloat(zoomView.image.width)
         zoomView.cursorDotDiameter = max(screenDiameter, 6)
         if drawingState.isBlurMode {
             zoomView.cursorDotColor = NSColor.gray.withAlphaComponent(0.5)
@@ -884,28 +953,27 @@ final class ZoomOverlayController {
             x: window.frame.midX,
             y: window.frame.midY
         )
-        let flippedY = NSScreen.main.map { $0.frame.height - center.y } ?? center.y
+        let flippedY = NSScreen.screens.first.map { $0.frame.maxY - center.y } ?? center.y
         CGWarpMouseCursorPosition(CGPoint(x: center.x, y: flippedY))
-        zoomView?.updateMousePosition(center)
+        zoomView?.updateCursorDotPosition(center)
     }
 
     // MARK: - Dismiss
 
-    func dismiss() {
-        guard !isDismissing else { return }
+    func dismiss(animated: Bool = true) {
+        guard window != nil else { return }
+        if isDismissing {
+            if !animated { cleanup() }
+            return
+        }
         isDismissing = true
 
         if let monitor = localEventMonitor {
             NSEvent.removeMonitor(monitor)
             localEventMonitor = nil
         }
-        if let monitor = globalEventMonitor {
-            NSEvent.removeMonitor(monitor)
-            globalEventMonitor = nil
-        }
-
         let currentZoom = zoomView?.zoomFactor ?? targetZoom
-        if animateIn {
+        if animateIn && animated {
             animateZoom(from: currentZoom, to: 1.0) { [weak self] in
                 self?.cleanup()
             }
@@ -937,6 +1005,7 @@ final class ZoomOverlayController {
     }
 
     private func cleanup() {
+        escapeHotkeyManager.unregister(id: Self.escapeHotkeyID)
         animationTimer?.invalidate()
         animationTimer = nil
 
@@ -944,18 +1013,19 @@ final class ZoomOverlayController {
             NSEvent.removeMonitor(monitor)
             localEventMonitor = nil
         }
-        if let monitor = globalEventMonitor {
-            NSEvent.removeMonitor(monitor)
-            globalEventMonitor = nil
-        }
+        removeFocusObservers()
 
         stopCursorBlink()
         toolTipHUD.teardown()
         unhideCursor()
 
+        window?.onCancel = nil
         window?.orderOut(nil)
         window = nil
         zoomView = nil
+        let pendingSave = savePanel
+        savePanel = nil
+        pendingSave?.cancel(nil)
 
         mode = .panning
         isDismissing = false
@@ -965,6 +1035,7 @@ final class ZoomOverlayController {
 
         let callback = onDismiss
         onDismiss = nil
+        if callback != nil { overlayLogger.notice("Zoom overlay removed and Escape released") }
         callback?()
     }
 }

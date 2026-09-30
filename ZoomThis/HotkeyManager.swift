@@ -9,8 +9,9 @@ final class HotkeyManager {
         let id: UInt32
         let keyCode: UInt32
         let modifiers: UInt32
+        let suspendDuringMenuTracking: Bool
         let callback: @Sendable () -> Void
-        let hotKeyRef: EventHotKeyRef
+        let hotKeyRef: EventHotKeyRef?
     }
 
     /// FourCC signature: 'ZMTH'
@@ -20,6 +21,7 @@ final class HotkeyManager {
     private var eventHandlerRef: EventHandlerRef?
     private var suspendedRegistrations: [Registration] = []
     private var menuTrackingObservers: [Any] = []
+    private var menuTrackingDepth = 0
 
     init() {
         installEventHandler()
@@ -28,8 +30,14 @@ final class HotkeyManager {
 
     // MARK: - Public
 
-    func register(id: UInt32, keyCode: UInt32, modifiers: UInt32, callback: @escaping @Sendable () -> Void) {
+    @discardableResult
+    func register(id: UInt32, keyCode: UInt32, modifiers: UInt32, suspendDuringMenuTracking: Bool = true, callback: @escaping @Sendable () -> Void) -> Bool {
         unregister(id: id)
+        guard eventHandlerRef != nil else { return false }
+        if menuTrackingDepth > 0 && suspendDuringMenuTracking {
+            suspendedRegistrations.append(Registration(id: id, keyCode: keyCode, modifiers: modifiers, suspendDuringMenuTracking: suspendDuringMenuTracking, callback: callback, hotKeyRef: nil))
+            return true
+        }
 
         let hotKeyID = EventHotKeyID(signature: Self.hotKeySignature, id: id)
         var ref: EventHotKeyRef?
@@ -45,20 +53,22 @@ final class HotkeyManager {
 
         guard status == noErr, let ref else {
             logger.error("RegisterEventHotKey failed for id \(id), status \(status)")
-            return
+            return false
         }
 
-        registrations[id] = Registration(id: id, keyCode: keyCode, modifiers: modifiers, callback: callback, hotKeyRef: ref)
+        registrations[id] = Registration(id: id, keyCode: keyCode, modifiers: modifiers, suspendDuringMenuTracking: suspendDuringMenuTracking, callback: callback, hotKeyRef: ref)
+        return true
     }
 
     func unregister(id: UInt32) {
-        guard let registration = registrations.removeValue(forKey: id) else { return }
-        UnregisterEventHotKey(registration.hotKeyRef)
+        suspendedRegistrations.removeAll { $0.id == id }
+        guard let registration = registrations.removeValue(forKey: id), let ref = registration.hotKeyRef else { return }
+        UnregisterEventHotKey(ref)
     }
 
     func unregisterAll() {
         for registration in registrations.values {
-            UnregisterEventHotKey(registration.hotKeyRef)
+            if let ref = registration.hotKeyRef { UnregisterEventHotKey(ref) }
         }
         registrations.removeAll()
         suspendedRegistrations.removeAll()
@@ -87,19 +97,23 @@ final class HotkeyManager {
     }
 
     private func suspendHotkeys() {
-        guard suspendedRegistrations.isEmpty else { return }
-        suspendedRegistrations = Array(registrations.values)
-        for reg in registrations.values {
-            UnregisterEventHotKey(reg.hotKeyRef)
+        menuTrackingDepth += 1
+        guard menuTrackingDepth == 1 else { return }
+        suspendedRegistrations = registrations.values.filter { $0.suspendDuringMenuTracking }
+        for reg in suspendedRegistrations {
+            if let ref = reg.hotKeyRef { UnregisterEventHotKey(ref) }
+            registrations.removeValue(forKey: reg.id)
         }
-        registrations.removeAll()
     }
 
     private func resumeHotkeys() {
+        guard menuTrackingDepth > 0 else { return }
+        menuTrackingDepth -= 1
+        guard menuTrackingDepth == 0 else { return }
         let toRestore = suspendedRegistrations
         suspendedRegistrations.removeAll()
         for reg in toRestore {
-            register(id: reg.id, keyCode: reg.keyCode, modifiers: reg.modifiers, callback: reg.callback)
+            register(id: reg.id, keyCode: reg.keyCode, modifiers: reg.modifiers, suspendDuringMenuTracking: reg.suspendDuringMenuTracking, callback: reg.callback)
         }
     }
 
@@ -130,9 +144,11 @@ final class HotkeyManager {
                     &hotKeyID
                 )
                 guard err == noErr else { return err }
+                guard hotKeyID.signature == HotkeyManager.hotKeySignature else { return OSStatus(eventNotHandledErr) }
 
                 let mgr = Unmanaged<HotkeyManager>.fromOpaque(userData).takeUnretainedValue()
                 if let reg = mgr.registrations[hotKeyID.id] {
+                    logger.notice("Global shortcut received: id=\(hotKeyID.id), mainThread=\(Thread.isMainThread)")
                     reg.callback()
                     return noErr
                 }

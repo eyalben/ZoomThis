@@ -34,6 +34,7 @@ final class AppState {
     var isFirstRun: Bool { UserDefaults.standard.object(forKey: "hotkeyKeyCode") == nil }
 
     // State
+    private(set) var isCapturingScreen = false
     var isZoomActive = false
     var isTimerActive = false
     var hasScreenRecordingPermission = false
@@ -120,16 +121,20 @@ final class AppState {
     // MARK: - Zoom
 
     func activateZoom() async {
+        Logger.general.notice("Zoom requested: active=\(self.isZoomActive), capturing=\(self.isCapturingScreen), dismissing=\(self.overlayController.isDismissing)")
         if isZoomActive {
             isZoomActive = false
             overlayController.dismiss()
             return
         }
-        guard !overlayController.isDismissing, !isTimerActive else { return }
+        guard !isCapturingScreen, !overlayController.isDismissing, !isTimerActive else { return }
+        isCapturingScreen = true
+        defer { isCapturingScreen = false }
         guard let result = await screenCaptureManager.captureScreen() else {
-            hasScreenRecordingPermission = false
+            checkPermissions()
             return
         }
+        Logger.general.notice("Screen capture ready: \(result.image.width)x\(result.image.height)")
         hasScreenRecordingPermission = true
         isZoomActive = true
         overlayController.show(
@@ -139,7 +144,8 @@ final class AppState {
             animateIn: zoomAnimationEnabled,
             defaultColor: defaultNSColor(),
             defaultLineWidth: defaultPenThickness,
-            defaultTextFontSize: defaultTextFontSize
+            defaultTextFontSize: defaultTextFontSize,
+            defaultTextFontName: defaultTextFontName
         ) { [weak self] in
             self?.deactivateZoom()
         }
@@ -152,6 +158,7 @@ final class AppState {
     // MARK: - Timer
 
     func activateTimer() {
+        guard !isCapturingScreen, !overlayController.isDismissing else { return }
         guard !isZoomActive, !isTimerActive else {
             // If timer is active and minimized, restore it
             if isTimerActive && breakTimerController.isMinimized {
@@ -159,8 +166,7 @@ final class AppState {
             }
             return
         }
-        isTimerActive = true
-        breakTimerController.show(duration: defaultTimerDuration) { [weak self] in
+        isTimerActive = breakTimerController.show(duration: defaultTimerDuration) { [weak self] in
             self?.deactivateTimer()
         }
     }

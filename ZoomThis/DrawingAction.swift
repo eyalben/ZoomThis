@@ -102,9 +102,9 @@ enum DrawingAction {
             let drawRect: CGRect
             switch alignment {
             case .right:
-                drawRect = CGRect(x: position.x - size.width, y: position.y - verticalOffset, width: size.width + 100, height: size.height * 10)
+                drawRect = CGRect(x: position.x - size.width, y: position.y - verticalOffset, width: size.width, height: size.height)
             default:
-                drawRect = CGRect(x: position.x, y: position.y - verticalOffset, width: size.width + 100, height: size.height * 10)
+                drawRect = CGRect(x: position.x, y: position.y - verticalOffset, width: size.width, height: size.height)
             }
             nsString.draw(in: drawRect, withAttributes: attributes)
 

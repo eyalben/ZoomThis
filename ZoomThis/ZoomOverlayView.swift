@@ -7,7 +7,13 @@ final class ZoomOverlayView: NSView {
     var zoomFactor: CGFloat = 2.0 {
         didSet { needsDisplay = true }
     }
-    var drawingState: DrawingState?
+    var drawingState: DrawingState? {
+        didSet {
+            committedLayer = nil
+            committedRevision = nil
+            needsDisplay = true
+        }
+    }
     var inProgressAction: DrawingAction? {
         didSet { needsDisplay = true }
     }
@@ -29,7 +35,7 @@ final class ZoomOverlayView: NSView {
 
     // Cached committed drawing layer — invalidated on commit/undo
     private var committedLayer: CGImage?
-    private var committedActionCount = 0
+    private var committedRevision: UInt64?
 
     init(image: CGImage, frame: NSRect) {
         self.image = image
@@ -45,7 +51,9 @@ final class ZoomOverlayView: NSView {
     override var acceptsFirstResponder: Bool { true }
 
     override func keyDown(with event: NSEvent) {
-        // Suppress default NSBeep — key events are handled by the event monitor
+        // Keep Escape available through the responder chain if the monitor is bypassed.
+        if event.keyCode == 53 { window?.cancelOperation(nil) }
+        // Other keys are handled by the event monitor; suppress the default NSBeep.
     }
 
     func updateMousePosition(_ screenPoint: NSPoint) {
@@ -60,6 +68,13 @@ final class ZoomOverlayView: NSView {
 
     // MARK: - Coordinate Conversion
 
+    func viewPoint(fromScreen screenPoint: NSPoint) -> NSPoint {
+        guard let window else {
+            return NSPoint(x: screenPoint.x - frame.origin.x, y: screenPoint.y - frame.origin.y)
+        }
+        return convert(window.convertPoint(fromScreen: screenPoint), from: nil)
+    }
+
     private func currentCropRect() -> CGRect {
         let viewWidth = bounds.width
         let viewHeight = bounds.height
@@ -68,8 +83,9 @@ final class ZoomOverlayView: NSView {
         let scaleX = imageWidth / viewWidth
         let scaleY = imageHeight / viewHeight
 
-        let viewMouseX = mousePosition.x - frame.origin.x
-        let viewMouseY = mousePosition.y - frame.origin.y
+        let viewMouse = viewPoint(fromScreen: mousePosition)
+        let viewMouseX = viewMouse.x
+        let viewMouseY = viewMouse.y
         let imageMouseX = viewMouseX * scaleX
         let imageMouseY = (viewHeight - viewMouseY) * scaleY
 
@@ -106,9 +122,9 @@ final class ZoomOverlayView: NSView {
 
     private func invalidateCommittedLayerIfNeeded() {
         guard let drawingState else { return }
-        if drawingState.actions.count != committedActionCount {
+        if drawingState.revision != committedRevision {
             committedLayer = nil
-            committedActionCount = drawingState.actions.count
+            committedRevision = drawingState.revision
         }
     }
 
@@ -271,8 +287,9 @@ final class ZoomOverlayView: NSView {
 
     private func drawCursorDot(context: CGContext) {
         // Convert screen-space cursor dot position to view-local coords
-        let viewX = cursorDotPosition.x - frame.origin.x
-        let viewY = cursorDotPosition.y - frame.origin.y
+        let viewPosition = viewPoint(fromScreen: cursorDotPosition)
+        let viewX = viewPosition.x
+        let viewY = viewPosition.y
         let diameter = max(cursorDotDiameter, 6)
         let radius = diameter / 2
 
@@ -387,8 +404,9 @@ final class ZoomOverlayView: NSView {
             if startIndex > 0 { break }
         }
 
-        // Context is already Y-down (flipped by caller)
+        // The source image is already drawn; erase only discards earlier annotations.
         for i in startIndex..<drawingState.actions.count {
+            if case .eraseAll = drawingState.actions[i] { continue }
             drawingState.actions[i].render(in: ctx, imageSize: imageSize, sourceImage: image)
         }
     }

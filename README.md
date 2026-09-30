@@ -59,6 +59,8 @@ Full-screen countdown timer for structured breaks. Minimizes to the menu bar whe
 | `Ctrl` + ↑/↓ | Increase/decrease line width |
 | `Ctrl` + scroll | Adjust line width |
 
+**Escape always exits zoom immediately**, including text input and crop selection. Use Return to finish text, or right-click to cancel a crop without closing zoom. Switching to another app also dismisses the zoom overlay. Escape uses a global shortcut while zoom is open, so it can exit even when the overlay does not receive normal keyboard events.
+
 ### Break Timer
 | Key | Action |
 |-----|--------|

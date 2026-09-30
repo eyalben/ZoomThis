@@ -1,9 +1,12 @@
 import AppKit
 
 final class BreakTimerController {
+    private static let escapeHotkeyID = UInt32.max - 1
+    private let escapeHotkeyManager = HotkeyManager()
     private var window: NSWindow?
     private var timerView: BreakTimerView?
     private var countdownTimer: Timer?
+    private var deadline: Date?
     private var localEventMonitor: Any?
     private var onDismiss: (() -> Void)?
     private var resignObserver: Any?
@@ -12,15 +15,18 @@ final class BreakTimerController {
     private(set) var isActive = false
     private(set) var isMinimized = false
 
-    func show(duration: TimeInterval, onDismiss: @escaping () -> Void) {
-        guard !isActive else { return }
+    @discardableResult
+    func show(duration: TimeInterval, onDismiss: @escaping () -> Void) -> Bool {
+        guard !isActive, duration.isFinite, duration > 0, duration < Double(Int.max) else { return false }
         // Resolve screen before mutating state to avoid stuck isActive on early return
         let mouseLocation = NSEvent.mouseLocation
         guard let screen = NSScreen.screens.first(where: {
             NSMouseInRect(mouseLocation, $0.frame, false)
-        }) ?? NSScreen.main else { return }
+        }) ?? NSScreen.main else { return false }
+        guard armEscapeShortcut() else { return false }
         self.onDismiss = onDismiss
-        remainingSeconds = Int(duration)
+        deadline = Date().addingTimeInterval(duration)
+        remainingSeconds = Int(duration.rounded(.up))
         isActive = true
         isMinimized = false
         let screenFrame = screen.frame
@@ -31,7 +37,7 @@ final class BreakTimerController {
             backing: .buffered,
             defer: false
         )
-        window.level = .screenSaver
+        window.level = .normal
         window.isOpaque = true
         window.hasShadow = false
         window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
@@ -42,6 +48,7 @@ final class BreakTimerController {
         window.contentView = timerView
         self.timerView = timerView
         self.window = window
+        window.onCancel = { [weak self] in self?.dismiss() }
 
         window.makeKeyAndOrderFront(nil)
         NSApp.activate()
@@ -56,30 +63,42 @@ final class BreakTimerController {
         ) { [weak self] _ in
             self?.minimize()
         }
+        return true
+    }
+
+    private func armEscapeShortcut() -> Bool {
+        escapeHotkeyManager.register(id: Self.escapeHotkeyID, keyCode: 53, modifiers: 0, suspendDuringMenuTracking: false) { [weak self] in
+            MainActor.assumeIsolated { self?.dismiss() }
+        }
     }
 
     private func startCountdown() {
         countdownTimer?.invalidate()
-        countdownTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
-            guard let self else { return }
-            self.remainingSeconds -= 1
-            if self.remainingSeconds <= 0 {
-                self.dismiss()
-            } else {
-                self.timerView?.remainingSeconds = self.remainingSeconds
-            }
+        let timer = Timer(timeInterval: 1.0, repeats: true) { [weak self] _ in
+            self?.updateRemainingTime()
         }
+        RunLoop.main.add(timer, forMode: .common)
+        countdownTimer = timer
+    }
+
+    private func updateRemainingTime() {
+        guard let deadline else { return }
+        remainingSeconds = Int(max(0, deadline.timeIntervalSinceNow).rounded(.up))
+        timerView?.remainingSeconds = remainingSeconds
+        if remainingSeconds == 0 { dismiss() }
     }
 
     private func startEventMonitor() {
         localEventMonitor = NSEvent.addLocalMonitorForEvents(
             matching: [.keyDown, .scrollWheel]
         ) { [weak self] event in
-            self?.handleEvent(event)
+            guard let self else { return event }
+            return self.handleEvent(event)
         }
     }
 
     private func handleEvent(_ event: NSEvent) -> NSEvent? {
+        guard isActive, !isMinimized, let window, event.window === window else { return event }
         switch event.type {
         case .keyDown:
             if event.keyCode == 53 { // Escape
@@ -97,6 +116,7 @@ final class BreakTimerController {
                 return event
             }
         case .scrollWheel:
+            guard event.scrollingDeltaY != 0 else { return nil }
             let seconds: Int
             if event.modifierFlags.contains(.control) {
                 seconds = event.scrollingDeltaY > 0 ? 30 : -30
@@ -111,29 +131,32 @@ final class BreakTimerController {
     }
 
     private func adjustTime(_ delta: Int) {
-        remainingSeconds = max(0, remainingSeconds + delta)
-        timerView?.remainingSeconds = remainingSeconds
-        if remainingSeconds <= 0 {
-            dismiss()
-        }
+        guard let deadline else { return }
+        self.deadline = deadline.addingTimeInterval(TimeInterval(delta))
+        updateRemainingTime()
     }
 
     func minimize() {
         guard isActive, !isMinimized else { return }
         isMinimized = true
+        escapeHotkeyManager.unregister(id: Self.escapeHotkeyID)
         window?.orderOut(nil)
     }
 
     func restore() {
         guard isActive, isMinimized else { return }
+        updateRemainingTime()
+        guard isActive, armEscapeShortcut() else { return }
         isMinimized = false
         window?.makeKeyAndOrderFront(nil)
         NSApp.activate()
     }
 
     func dismiss() {
+        escapeHotkeyManager.unregister(id: Self.escapeHotkeyID)
         countdownTimer?.invalidate()
         countdownTimer = nil
+        deadline = nil
 
         if let monitor = localEventMonitor {
             NSEvent.removeMonitor(monitor)
